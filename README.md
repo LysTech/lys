@@ -45,12 +45,9 @@ VTKScene().add(mesh).show()
 
 ### Working with Time-Series Data
 ```python
-# Create a scene
 scene = VTKScene()
 scene.add(time_series_mesh)
 scene.show()
-scene.style(time_series_mesh, opacity=0.5) #change the opacity
-scene.style(time_series_mesh, cmap="viridis") #change the cmap, currently only "viridis" is defined
-
+scene.style(time_series_mesh, opacity=0.5, cmap="viridis") #change the opacity and/or cmap
 ```
 
