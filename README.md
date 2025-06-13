@@ -58,24 +58,3 @@ scene.show()
 scene.set_timepoint(5)
 ```
 
-## Dependencies
-- VTK
-- PyQt5 (or PySide6)
-- NumPy
-- SciPy
-
-## Development Guidelines
-
-1. Default to plotting everything automatically
-2. If a function was written by GPT and not carefully studied, mention this in the comment
-3. Follow the established code structure and patterns
-4. Add tests for new functionality
-5. Document new features and changes
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
-
-[Add license information here]
