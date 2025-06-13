@@ -4,6 +4,7 @@ import vtk
 from typing import List, Tuple
 
 from lys.visualization.plot3d import VTKScene
+from lys.visualization.utils import _make_scalar_bar, create_viridis_colormap
 
 """
 Defines classes related to meshes:
@@ -18,7 +19,6 @@ VTKScene().add(mesh).show()
 """
 
 #TODO: 
-# - add plotting to the __init__ function of Mesh
 # - implement the downsample function
 # - create our own mesh from a segmentation Volume
 
@@ -111,11 +111,7 @@ class StaticMeshData:
 
         # Apply colormap
         if cmap == "viridis":
-            lut = vtk.vtkLookupTable()
-            lut.SetHueRange(0.7, 0.0)
-            lut.SetSaturationRange(1.0, 1.0)
-            lut.SetValueRange(0.0, 1.0)
-            lut.Build()
+            lut = create_viridis_colormap()
             mapper.SetLookupTable(lut)
 
         # Create scalar bar
@@ -141,22 +137,8 @@ class StaticMeshData:
         if cmap is not None and cmap == "viridis":
             mapper = actor.GetMapper()
             if mapper:
-                lut = vtk.vtkLookupTable()
-                lut.SetHueRange(0.7, 0.0)
-                lut.SetSaturationRange(1.0, 1.0)
-                lut.SetValueRange(0.0, 1.0)
-                lut.Build()
+                lut = create_viridis_colormap()
                 mapper.SetLookupTable(lut)
-
-    def _make_scalar_bar(self, lut: vtk.vtkLookupTable, title: str = "", n_labels: int = 5):
-        """Helper to create scalar bar."""
-        bar = vtk.vtkScalarBarActor()
-        bar.SetLookupTable(lut)
-        bar.SetTitle(title)
-        bar.SetNumberOfLabels(n_labels)
-        bar.UnconstrainedFontSizeOn()
-        return bar
-
 
 class TimeSeriesMeshData:
     """ Mesh with one timeseries per vertex, useful for plotting. """
@@ -178,11 +160,7 @@ class TimeSeriesMeshData:
         mapper.SetScalarRange(float(self.timeseries.min()), float(self.timeseries.max()))
 
         if cmap == "viridis":
-            lut = vtk.vtkLookupTable()
-            lut.SetHueRange(0.7, 0.0)
-            lut.SetSaturationRange(1.0, 1.0)
-            lut.SetValueRange(0.0, 1.0)
-            lut.Build()
+            lut = create_viridis_colormap()
             mapper.SetLookupTable(lut)
 
         scalar_bar = _make_scalar_bar(mapper.GetLookupTable())
@@ -216,7 +194,6 @@ class TimeSeriesMeshData:
         poly.Modified()
 
 
-# Standalone function for creating scalar bars
 def _make_scalar_bar(lut: vtk.vtkLookupTable, title: str = "", n_labels: int = 5):
     """Helper to create scalar bar."""
     bar = vtk.vtkScalarBarActor()

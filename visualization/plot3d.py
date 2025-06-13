@@ -34,6 +34,15 @@ class VTKScene:
         self._qt_app: Optional[QtWidgets.QApplication] = None
         self._qt_window: Optional[_SceneWindow] = None
     
+    def _create_timeseries_slider(self, parent=None) -> QtWidgets.QSlider:
+        """Create a time series slider widget."""
+        slider = QtWidgets.QSlider(QtCore.Qt.Horizontal, parent)
+        slider.setMinimum(0)
+        slider.setMaximum(self._max_timepoints() - 1)
+        slider.setValue(self._current_global_timepoint)
+        slider.valueChanged.connect(lambda v: self.set_timepoint(v))
+        return slider
+
     def add(self, obj: Any, **style) -> "VTKScene":
         """Add any object that has a to_vtk() method."""
         if not hasattr(obj, 'to_vtk'):
@@ -66,12 +75,7 @@ class VTKScene:
         if self._qt_window is not None and hasattr(obj, "timeseries"):
             if not any(isinstance(w, QtWidgets.QSlider)
                        for w in self._qt_window.centralWidget().findChildren(QtWidgets.QSlider)):
-                # create slider exactly as in _SceneWindow.__init__
-                slider = QtWidgets.QSlider(QtCore.Qt.Horizontal, self._qt_window)
-                slider.setMinimum(0)
-                slider.setMaximum(self._max_timepoints() - 1)
-                slider.setValue(self._current_global_timepoint)
-                slider.valueChanged.connect(lambda v: self.set_timepoint(v))
+                slider = self._create_timeseries_slider(self._qt_window)
                 self._qt_window.centralWidget().layout().addWidget(slider, stretch=0)
 
         return self
@@ -275,11 +279,7 @@ class _SceneWindow(QtWidgets.QMainWindow):
         # Time‑series slider – only if needed
         max_tp = self._max_timepoints()
         if max_tp > 1:
-            slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
-            slider.setMinimum(0)
-            slider.setMaximum(max_tp - 1)
-            slider.setValue(scene._current_global_timepoint)
-            slider.valueChanged.connect(lambda v: scene.set_timepoint(v))
+            slider = scene._create_timeseries_slider()
             layout.addWidget(slider, stretch=0)
 
         # Finalise interactor *after* widgets are laid out

@@ -1,0 +1,100 @@
+import vtk
+import numpy as np
+
+from lys.visualization.plot3d import VTKScene
+from lys.visualization.utils import _make_scalar_bar, create_viridis_colormap
+
+#TODO: current way to apply colormap violates Open-Closed Principle, should be refactored
+
+class Volume:
+    def __init__(self, array, metadata, show=True):
+        """ Construct volume and show it if show is True """
+        self.array = array
+        self.metadata = metadata
+        self._check_volume()
+        if show:
+            VTKScene().add(self).show()
+    
+    def _check_volume(self):
+        """ Check volume properties:
+            - 3D array shape
+            - Valid data type
+        """
+        assert len(self.array.shape) == 3, f"Expected 3D array, got shape {self.array.shape}"
+        assert np.issubdtype(self.array.dtype, np.number), f"Expected numeric array, got {self.array.dtype}"
+    
+    def to_vtk(self, opacity: float = 0.3, iso_value: float = None, cmap: str = "viridis", **kw) -> list:
+        """Convert volume to VTK actor (required by plotting code)"""
+        # Create VTK image data from numpy array
+        vtk_data = vtk.vtkImageData()
+        vtk_data.SetDimensions(self.array.shape)
+        vtk_data.SetSpacing(1.0, 1.0, 1.0)  # Could be customized based on metadata
+        vtk_data.SetOrigin(0.0, 0.0, 0.0)   # Could be customized based on metadata
+        
+        # Convert numpy array to VTK format
+        flat_array = self.array.flatten(order='F')  # VTK uses Fortran ordering
+        vtk_array = vtk.vtkFloatArray()
+        vtk_array.SetNumberOfComponents(1)
+        vtk_array.SetNumberOfTuples(len(flat_array))
+        for i, val in enumerate(flat_array):
+            vtk_array.SetValue(i, float(val))
+        vtk_data.GetPointData().SetScalars(vtk_array)
+        
+        # Use marching cubes to extract isosurface
+        marching_cubes = vtk.vtkMarchingCubes()
+        marching_cubes.SetInputData(vtk_data)
+        
+        # Set iso value - use mean if not specified
+        if iso_value is None:
+            iso_value = float(np.mean(self.array))
+        marching_cubes.SetValue(0, iso_value)
+        marching_cubes.Update()
+        
+        # Create mapper and actor
+        mapper = vtk.vtkPolyDataMapper()
+        mapper.SetInputConnection(marching_cubes.GetOutputPort())
+        
+        # Set scalar range for the mapper
+        data_range = (float(self.array.min()), float(self.array.max()))
+        mapper.SetScalarRange(*data_range)
+        
+        # Apply colormap
+        if cmap == "viridis":
+            lut = create_viridis_colormap()
+            mapper.SetLookupTable(lut)
+        
+        actor = vtk.vtkActor()
+        actor.SetMapper(mapper)
+        actor.GetProperty().SetOpacity(opacity)
+        
+        # Create scalar bar
+        scalar_bar = _make_scalar_bar(mapper.GetLookupTable(), title="Volume Data")
+        actor._scalar_bar = scalar_bar  # Store reference for later use
+        
+        return [actor, scalar_bar]
+    
+    def apply_style(self, actor: vtk.vtkActor, opacity: float = None, color: tuple = None, 
+                   data_range: tuple = None, cmap: str = None, **kw):
+        """Apply styling to existing VTK actor."""
+        if opacity is not None:
+            actor.GetProperty().SetOpacity(opacity)
+        if color is not None:
+            actor.GetProperty().SetColor(*color)
+        
+        # Handle scalar range updates
+        if data_range is not None:
+            mapper = actor.GetMapper()
+            if mapper:
+                mapper.SetScalarRange(*data_range)
+        
+        # Handle colormap updates
+        if cmap is not None:
+            mapper = actor.GetMapper()
+            if mapper:
+                if cmap == "viridis":
+                    lut = create_viridis_colormap()
+                    mapper.SetLookupTable(lut)
+                    
+                    # Update scalar bar if it exists
+                    if hasattr(actor, '_scalar_bar'):
+                        actor._scalar_bar.SetLookupTable(lut)

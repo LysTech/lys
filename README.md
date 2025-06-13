@@ -47,14 +47,10 @@ VTKScene().add(mesh).show()
 ```python
 # Create a scene
 scene = VTKScene()
-
-# Add a time-series mesh
 scene.add(time_series_mesh)
-
-# Show the visualization with time control
 scene.show()
+scene.style(time_series_mesh, opacity=0.5) #change the opacity
+scene.style(time_series_mesh, cmap="viridis") #change the cmap, currently only "viridis" is defined
 
-# Update to a specific timepoint
-scene.set_timepoint(5)
 ```
 
