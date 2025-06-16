@@ -21,14 +21,22 @@ lys/
 
 ### Basic Mesh Loading and Visualization
 ```python
-from lys.objects.mesh import from_mat
+from lys.objects.mesh import from_mat, StaticMeshData
 from lys.visualization.plot3d import VTKScene
 
 # Load a mesh from a MATLAB file
 mesh = from_mat("/path/to/mesh.mat")
 
 # Create and show the visualization
-VTKScene().add(mesh).show()
+scene = VTKScene()
+scene.add(mesh).show()
+scene.remove(mesh)
+
+# If you want data on the mesh, e.g. t-stats
+data = np.random.rand(mesh.vertices.shape[0])) * 3 #these are between 0 and 3
+static_data_mesh = StaticMeshData(mesh, data) 
+scene.add(static_data_mesh) 
+scene.style(static_data_mesh, normalize=True)
 ```
 
 ### Working with Time-Series Data

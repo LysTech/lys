@@ -63,7 +63,7 @@ class Mesh:
         actor.GetProperty().SetOpacity(opacity)
         return actor
     
-    def apply_style(self, actor: vtk.vtkActor, cmap: str = None, opacity: float = None, **kw):
+    def apply_style(self, actor: vtk.vtkActor, opacity: float = None, **kw):
         """Apply styling to existing VTK actor."""
         if opacity is not None:
             actor.GetProperty().SetOpacity(opacity)
@@ -120,18 +120,10 @@ class StaticMeshData:
         
         return [actor, scalar_bar]
 
-    def apply_style(self, actor: vtk.vtkActor, cmap: str = None, opacity: float = None, 
-                   data_range: Tuple[float, float] = None, **kw):
+    def apply_style(self, actor: vtk.vtkActor, cmap: str = None, opacity: float = None, normalize: bool = False, **kw):
         """Apply styling to existing VTK actor."""
         # Apply base mesh styling first
-        self.mesh.apply_style(actor, cmap=cmap, opacity=opacity, **kw)
-        
-        # Apply data-specific styling
-        if data_range is not None:
-            self.data_range = data_range
-            mapper = actor.GetMapper()
-            if mapper:
-                mapper.SetScalarRange(*data_range)
+        self.mesh.apply_style(actor, opacity=opacity, **kw)
         
         # Update colormap if requested
         if cmap is not None and cmap == "viridis":
@@ -139,6 +131,29 @@ class StaticMeshData:
             if mapper:
                 lut = create_viridis_colormap()
                 mapper.SetLookupTable(lut)
+        
+        # Apply normalization if requested
+        mapper = actor.GetMapper()
+        if mapper:
+            poly = mapper.GetInput()
+            scalars = vtk.vtkFloatArray()
+            scalars.SetName("StaticData")
+            scalars.SetNumberOfComponents(1)
+            scalars.SetNumberOfTuples(len(self.data))
+            
+            if normalize:
+                data_min, data_max = self.data_range
+                normalized_data = (self.data - data_min) / (data_max - data_min)
+                for i, v in enumerate(normalized_data):
+                    scalars.SetValue(i, float(v))
+                mapper.SetScalarRange(0.0, 1.0)
+            else:
+                for i, v in enumerate(self.data):
+                    scalars.SetValue(i, float(v))
+                mapper.SetScalarRange(*self.data_range)
+            
+            poly.GetPointData().SetScalars(scalars)
+            poly.Modified()
 
 class TimeSeriesMeshData:
     """ Mesh with one timeseries per vertex, useful for plotting. """
