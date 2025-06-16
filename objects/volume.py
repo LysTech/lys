@@ -3,7 +3,6 @@ import json
 import numpy as np
 
 from lys.visualization.plot3d import VTKScene
-from lys.visualization.utils import _make_scalar_bar, get_vtk_colormap
 
 
 class Volume:
@@ -24,7 +23,7 @@ class Volume:
         assert len(self.array.shape) == 3, f"Expected 3D array, got shape {self.array.shape}"
         assert np.issubdtype(self.array.dtype, np.number), f"Expected numeric array, got {self.array.dtype}"
     
-    def to_vtk(self, opacity: float = 0.3, iso_value: float = None, cmap: str = "viridis", **kw) -> list:
+    def to_vtk(self, opacity: float = 0.3, **kw) -> list:
         """Convert volume to VTK actor (required by plotting code)"""
         # Create VTK image data from numpy array
         vtk_data = vtk.vtkImageData()
@@ -44,10 +43,10 @@ class Volume:
         # Use marching cubes to extract isosurface
         marching_cubes = vtk.vtkMarchingCubes()
         marching_cubes.SetInputData(vtk_data)
+        print("We are plotting isosurfaces of the volume using marching cubes.")
         
-        # Set iso value - use mean if not specified
-        if iso_value is None:
-            iso_value = float(np.mean(self.array))
+        # Set iso value to mean
+        iso_value = float(np.mean(self.array))
         marching_cubes.SetValue(0, iso_value)
         marching_cubes.Update()
         
@@ -59,20 +58,11 @@ class Volume:
         data_range = (float(self.array.min()), float(self.array.max()))
         mapper.SetScalarRange(*data_range)
         
-        # Apply colormap
-        if cmap is not None:
-            lut = get_vtk_colormap(cmap)
-            mapper.SetLookupTable(lut)
-        
         actor = vtk.vtkActor()
         actor.SetMapper(mapper)
         actor.GetProperty().SetOpacity(opacity)
         
-        # Create scalar bar
-        scalar_bar = _make_scalar_bar(mapper.GetLookupTable(), title="Volume Data")
-        actor._scalar_bar = scalar_bar  # Store reference for later use
-        
-        return [actor, scalar_bar]
+        return [actor]
     
     def apply_style(self, actor: vtk.vtkActor, opacity: float = None, color: tuple = None, 
                    data_range: tuple = None, cmap: str = None, **kw):
@@ -105,5 +95,6 @@ def from_jnii(file_path: str) -> Volume:
 
     volumeData = np.array(raw["struct"]["NIFTIData"]["_ArrayData_"], dtype=float)
     volumeData = volumeData.reshape(raw["struct"]["NIFTIHeader"]["Dim"])
+    print("Volume data gets divide by 50.")
     volumeData = volumeData / 50.0
     return Volume(volumeData)
