@@ -2,9 +2,8 @@ import vtk
 import numpy as np
 
 from lys.visualization.plot3d import VTKScene
-from lys.visualization.utils import _make_scalar_bar, create_viridis_colormap
+from lys.visualization.utils import _make_scalar_bar, get_vtk_colormap
 
-#TODO: current way to apply colormap violates Open-Closed Principle, should be refactored
 
 class Volume:
     def __init__(self, array, metadata, show=True):
@@ -59,8 +58,8 @@ class Volume:
         mapper.SetScalarRange(*data_range)
         
         # Apply colormap
-        if cmap == "viridis":
-            lut = create_viridis_colormap()
+        if cmap is not None:
+            lut = get_vtk_colormap(cmap)
             mapper.SetLookupTable(lut)
         
         actor = vtk.vtkActor()
@@ -91,10 +90,9 @@ class Volume:
         if cmap is not None:
             mapper = actor.GetMapper()
             if mapper:
-                if cmap == "viridis":
-                    lut = create_viridis_colormap()
-                    mapper.SetLookupTable(lut)
-                    
-                    # Update scalar bar if it exists
-                    if hasattr(actor, '_scalar_bar'):
-                        actor._scalar_bar.SetLookupTable(lut)
+                lut = get_vtk_colormap(cmap)
+                mapper.SetLookupTable(lut)
+                
+                # Update scalar bar if it exists
+                if hasattr(actor, '_scalar_bar'):
+                    actor._scalar_bar.SetLookupTable(lut)

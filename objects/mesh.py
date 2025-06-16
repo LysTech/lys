@@ -4,7 +4,7 @@ import vtk
 from typing import List, Tuple
 
 from lys.visualization.plot3d import VTKScene
-from lys.visualization.utils import _make_scalar_bar, create_viridis_colormap
+from lys.visualization.utils import _make_scalar_bar, get_vtk_colormap
 
 """
 Defines classes related to meshes:
@@ -105,8 +105,8 @@ class StaticMeshData:
         mapper.SetScalarRange(*self.data_range)
 
         # Apply colormap
-        if cmap == "viridis":
-            lut = create_viridis_colormap()
+        if cmap is not None:
+            lut = get_vtk_colormap(cmap)
             mapper.SetLookupTable(lut)
 
         # Create scalar bar
@@ -117,17 +117,26 @@ class StaticMeshData:
 
     def apply_style(self, actor: vtk.vtkActor, cmap: str = None, opacity: float = None, **kw):
         """Apply styling to existing VTK actor."""
+        # This method is called for each actor associated with the object.
+        # We only want to act when called with the main mesh actor, which has a PolyDataMapper.
+        if not isinstance(actor.GetMapper(), vtk.vtkPolyDataMapper):
+            return
+
         # Apply base mesh styling first
         self.mesh.apply_style(actor, opacity=opacity, **kw)
         
-        # Update colormap if requested
-        if cmap is not None and cmap == "viridis":
-            mapper = actor.GetMapper()
-            if mapper:
-                lut = create_viridis_colormap()
-                mapper.SetLookupTable(lut)
-        
         mapper = actor.GetMapper()
+        
+        # Update colormap if requested
+        if cmap is not None:
+            if mapper:
+                lut = get_vtk_colormap(cmap)
+                mapper.SetLookupTable(lut)
+                
+                # Also update the scalar bar
+                if hasattr(actor, '_scalar_bar') and actor._scalar_bar:
+                    actor._scalar_bar.SetLookupTable(lut)
+        
         if mapper:
             poly = mapper.GetInput()
             scalars = vtk.vtkFloatArray()

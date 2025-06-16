@@ -40,6 +40,12 @@ scene.add(static_data_mesh) .show()
 
 By default we use the full range of the colormap, so if you pass values between [0,0.3] then the cmap is normalised to use the full range of colors. If we so please, we could re-write this as a `normalize=True/False` argument but I think we always (?) want to use the full range of color.
 
+```
+# Update the colormap to any allowed matplotlib colormap (or custom!)
+scene.style(static_data_mesh, cmap="inferno")
+```
+
+
 ### Working with Time-Series Data
 ```python
 scene = VTKScene()
