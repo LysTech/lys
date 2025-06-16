@@ -6,28 +6,16 @@
 ```
 lys/
 ├── objects/
+│   ├── atlas.py        # Atlas-related functionality
 │   ├── mesh.py         # Core mesh classes and functionality
+│   ├── volume.py       # Volume data handling
 │   └── __init__.py
 ├── visualization/
-│   └── plot3d.py       # VTK-based 3D visualization
+│   ├── plot3d.py       # VTK-based 3D visualization
+│   └── utils.py        # Visualization utilities
 └── tests/              # Test suite
 ```
 
-## Core Features
-
-### Mesh Processing
-- Load meshes from MATLAB (.mat) files
-- Basic mesh operations and validation
-- Support for static and time-series data on meshes
-- Mesh downsampling (planned feature)
-
-### Visualization
-- Interactive 3D visualization using VTK and Qt
-- Support for both static and time-series data visualization
-- Customizable colormaps and styling
-- Time-series playback with slider control
-- Screenshot capability
-- Jupyter/IPython integration
 
 ## Usage Examples
 
