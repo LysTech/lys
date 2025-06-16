@@ -1,4 +1,5 @@
 import vtk
+import json
 import numpy as np
 
 from lys.visualization.plot3d import VTKScene
@@ -6,13 +7,14 @@ from lys.visualization.utils import _make_scalar_bar, get_vtk_colormap
 
 
 class Volume:
-    def __init__(self, array, metadata, show=True):
+    def __init__(self, array, metadata={}, show=True):
         """ Construct volume and show it if show is True """
         self.array = array
         self.metadata = metadata
         self._check_volume()
         if show:
-            VTKScene().add(self).show()
+            _scene = VTKScene()
+            _scene.add(self).show()
     
     def _check_volume(self):
         """ Check volume properties:
@@ -96,3 +98,12 @@ class Volume:
                 # Update scalar bar if it exists
                 if hasattr(actor, '_scalar_bar'):
                     actor._scalar_bar.SetLookupTable(lut)
+
+def from_jnii(file_path: str) -> Volume:
+    with open(file_path, "r") as f:
+        raw = json.load(f)
+
+    volumeData = np.array(raw["struct"]["NIFTIData"]["_ArrayData_"], dtype=float)
+    volumeData = volumeData.reshape(raw["struct"]["NIFTIHeader"]["Dim"])
+    volumeData = volumeData / 50.0
+    return Volume(volumeData)

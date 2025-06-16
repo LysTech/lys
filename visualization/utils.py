@@ -9,6 +9,7 @@ def register_custom_colormap(name: str, lut: vtk.vtkLookupTable):
     """Register a custom colormap."""
     _custom_colormaps[name] = lut
 
+
 def get_vtk_colormap(name: str, n_colors: int = 256) -> vtk.vtkLookupTable:
     """
     Get a VTK lookup table by name.
@@ -36,6 +37,7 @@ def get_vtk_colormap(name: str, n_colors: int = 256) -> vtk.vtkLookupTable:
     
     lut.Build()
     return lut
+
 
 def _make_scalar_bar(lut: vtk.vtkLookupTable,
                      title: str = "",

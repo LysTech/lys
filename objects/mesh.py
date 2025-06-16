@@ -23,7 +23,8 @@ class Mesh:
         self.faces = faces
         self.vertices = vertices
         if show:
-            VTKScene().add(self).show()
+            _scene = VTKScene()
+            _scene.add(self).show()
         self._check_mesh()
 
     def downsample(self, n_vertices: int) -> 'Mesh':
@@ -59,7 +60,8 @@ class Mesh:
         return actor
     
     def apply_style(self, actor: vtk.vtkActor, opacity: float = None, **kw):
-        """Apply styling to existing VTK actor."""
+        """Apply styling to existing VTK actor. This violates Open-Closed Principle because
+        when we add a new style to a mesh we need to change this method, but I doubt this will happen much."""
         if opacity is not None:
             actor.GetProperty().SetOpacity(opacity)
 
