@@ -120,9 +120,9 @@ class VTKScene:
     def set_timepoint(self, t: int) -> "VTKScene":
         self._current_global_timepoint = t
         for obj in self._timeseries_objects.values():
-            if obj.timeseries.shape[1] > t >= 0:
-                obj.current_timepoint = t
-                self._update_timeseries_visualization(obj)
+            obj.set_timepoint(t)
+
+            self._update_timeseries_visualization(obj)
         return self.render()
 
     def _update_timeseries_visualization(self, obj: Any):

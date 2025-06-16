@@ -11,11 +11,6 @@ Defines classes related to meshes:
 - Mesh
 - StaticMeshData
 - TimeSeriesMeshData
-
-You can currently try this by doing
-
-mesh = from_mat("/path/to/mesh.mat")
-VTKScene().add(mesh).show()
 """
 
 #TODO: 
@@ -120,7 +115,7 @@ class StaticMeshData:
         
         return [actor, scalar_bar]
 
-    def apply_style(self, actor: vtk.vtkActor, cmap: str = None, opacity: float = None, normalize: bool = False, **kw):
+    def apply_style(self, actor: vtk.vtkActor, cmap: str = None, opacity: float = None, **kw):
         """Apply styling to existing VTK actor."""
         # Apply base mesh styling first
         self.mesh.apply_style(actor, opacity=opacity, **kw)
@@ -132,7 +127,6 @@ class StaticMeshData:
                 lut = create_viridis_colormap()
                 mapper.SetLookupTable(lut)
         
-        # Apply normalization if requested
         mapper = actor.GetMapper()
         if mapper:
             poly = mapper.GetInput()
@@ -141,16 +135,9 @@ class StaticMeshData:
             scalars.SetNumberOfComponents(1)
             scalars.SetNumberOfTuples(len(self.data))
             
-            if normalize:
-                data_min, data_max = self.data_range
-                normalized_data = (self.data - data_min) / (data_max - data_min)
-                for i, v in enumerate(normalized_data):
-                    scalars.SetValue(i, float(v))
-                mapper.SetScalarRange(0.0, 1.0)
-            else:
-                for i, v in enumerate(self.data):
-                    scalars.SetValue(i, float(v))
-                mapper.SetScalarRange(*self.data_range)
+            for i, v in enumerate(self.data):
+                scalars.SetValue(i, float(v))
+            mapper.SetScalarRange(*self.data_range)
             
             poly.GetPointData().SetScalars(scalars)
             poly.Modified()
@@ -160,54 +147,44 @@ class TimeSeriesMeshData:
     def __init__(self, mesh: Mesh, timeseries: np.ndarray, current_timepoint: int = 0):
         self.mesh = mesh
         self.timeseries = timeseries
-        self.current_timepoint = current_timepoint
         
         # Check timeseries dimensions
         assert len(timeseries.shape) == 2, f"Expected 2D timeseries array, got shape {timeseries.shape}"
         assert timeseries.shape[0] == mesh.vertices.shape[0], f"Timeseries vertices dimension {timeseries.shape[0]} must match number of vertices {mesh.vertices.shape[0]}"
+
+        # Internal StaticMeshData for the current time slice
+        self._static_view = StaticMeshData(mesh, timeseries[:, 0])
+        # The colormap range must span the entire timeseries
+        self._static_view.data_range = (timeseries.min(), timeseries.max())
+        
+        self.set_timepoint(current_timepoint)
     
+    def set_timepoint(self, t: int):
+        """Set the current timepoint."""
+        if not (0 <= t < self.timeseries.shape[1]):
+            raise IndexError(f"Timepoint {t} is out of bounds.")
+        self.current_timepoint = t
+        self._static_view.data = self.timeseries[:, t]
+
     def to_vtk(self, cmap: str = "viridis", opacity: float = 1.0, **kw) -> List[vtk.vtkProp]:
-        """Convert time-series mesh to VTK actors (mesh + scalar bar)."""
-        actor = self.mesh.to_vtk(opacity=opacity, **kw)
-        self._apply_timeseries_data(actor, self.timeseries[:, self.current_timepoint])
-
-        mapper = actor.GetMapper()
-        mapper.SetScalarRange(float(self.timeseries.min()), float(self.timeseries.max()))
-
-        if cmap == "viridis":
-            lut = create_viridis_colormap()
-            mapper.SetLookupTable(lut)
-
-        scalar_bar = _make_scalar_bar(mapper.GetLookupTable())
-        actor._scalar_bar = scalar_bar
-        return [actor, scalar_bar]
+        """Convert time-series mesh to VTK actors by delegating to the static view."""
+        return self._static_view.to_vtk(cmap=cmap, opacity=opacity, **kw)
     
     def apply_style(self, actor: vtk.vtkActor, **kw):
-        """Apply styling to time-series mesh actor."""
+        """Apply styling by delegating to the static view."""
+        # The mesh part of styling
         self.mesh.apply_style(actor, **kw)
+        
+        # The data part of styling
+        self._static_view.apply_style(actor, **kw)
     
     def update_timeseries_actor(self, actor: vtk.vtkActor):
-        """Update actor with current timepoint data."""
-        if hasattr(self, "timeseries") and hasattr(self, "current_timepoint"):
-            data = self.timeseries[:, self.current_timepoint]
-            self._apply_timeseries_data(actor, data)
-    
-    def _apply_timeseries_data(self, actor: vtk.vtkActor, data: np.ndarray):
-        """Helper to apply timeseries data to actor."""
-        mapper = actor.GetMapper()
-        poly = mapper.GetInput() if mapper else None
-        if poly is None:
-            return
-
-        scalars = vtk.vtkFloatArray()
-        scalars.SetName("TimeSeries")
-        scalars.SetNumberOfComponents(1)
-        scalars.SetNumberOfTuples(len(data))
-        for i, v in enumerate(data):
-            scalars.SetValue(i, float(v))
-        poly.GetPointData().SetScalars(scalars)
-        poly.Modified()
-
+        """Update actor with current timepoint data by re-applying style."""
+        # We assume the style is cached on the scene's handle and not passed here.
+        # We need to re-apply the style to update the scalars.
+        # A bit of a hack: apply_style will be called with no new style arguments,
+        # so it will just re-apply the current data.
+        self._static_view.apply_style(actor)
 
 def _make_scalar_bar(lut: vtk.vtkLookupTable, title: str = "", n_labels: int = 5):
     """Helper to create scalar bar."""

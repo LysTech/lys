@@ -35,9 +35,10 @@ scene.remove(mesh)
 # If you want data on the mesh, e.g. t-stats
 data = np.random.rand(mesh.vertices.shape[0])) * 3 #these are between 0 and 3
 static_data_mesh = StaticMeshData(mesh, data) 
-scene.add(static_data_mesh) 
-scene.style(static_data_mesh, normalize=True)
+scene.add(static_data_mesh) .show()
 ```
+
+By default we use the full range of the colormap, so if you pass values between [0,0.3] then the cmap is normalised to use the full range of colors. If we so please, we could re-write this as a `normalize=True/False` argument but I think we always (?) want to use the full range of color.
 
 ### Working with Time-Series Data
 ```python
