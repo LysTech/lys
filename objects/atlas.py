@@ -531,7 +531,17 @@ class Atlas:
             New color mapping for regions {label: (r, g, b)}
         """
         if opacity is not None:
-            actor.GetProperty().SetOpacity(opacity)
+            # For volume data, update the opacity transfer function
+            if isinstance(actor, vtk.vtkVolume):
+                volume_property = actor.GetProperty()
+                opacity_tf = volume_property.GetScalarOpacity()
+                # Update opacity for all visible labels
+                for label in self.visible_labels:
+                    opacity_tf.AddPoint(label, opacity)
+                opacity_tf.Modified()
+            else:
+                # For other types of actors
+                actor.GetProperty().SetOpacity(opacity)
         
         if colors is not None and hasattr(actor, '_lut'):
             # Update stored colors
