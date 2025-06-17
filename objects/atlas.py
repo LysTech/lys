@@ -6,9 +6,6 @@ from vtk.util import numpy_support
 
 from lys.visualization.plot3d import VTKScene
 
-#TODO: this doesn't look good with the segmentation in demo.py,
-# why don't I see a full skull?
-
 
 class Atlas:
     """A volume with discrete regions, each having a unique integer label."""
@@ -42,9 +39,10 @@ class Atlas:
                 self.label_names[label] = f"Region {label}"
         
         self.visible_labels = set(self.unique_labels)
-        self.legend_bounds = {}
+        self.legend_items = {}  # Store legend item actors
         self.vtk_volume = None
         self.opacity_tf = None
+        self.renderer = None
         
         # Generate default colors
         self._generate_default_colors()
@@ -54,14 +52,7 @@ class Atlas:
         if show:
             self.scene = VTKScene()
             self.scene.add(self)
-            
-            # The interactor is not available until the scene is created,
-            # so we set up the interaction after adding the atlas to the scene.
-            # Wait for the scene to be shown before setting up interaction
             self.scene.show()
-            if hasattr(self.scene, '_qt_window') and self.scene._qt_window is not None:
-                interactor = self.scene._qt_window.vtkWidget
-                self.setup_interaction(interactor)
     
     def _check_atlas(self):
         """Check atlas properties."""
@@ -80,6 +71,86 @@ class Atlas:
             rgb = colorsys.hsv_to_rgb(hue, 0.8, 0.9)
             self.colors[label] = rgb
     
+    def _create_checkbox_actor(self, label: int, x_pos: float, y_pos: float, size: float) -> vtk.vtkActor2D:
+        """Create a checkbox actor for the legend."""
+        checkbox_points = vtk.vtkPoints()
+        checkbox_lines = vtk.vtkCellArray()
+        
+        # Checkbox outline (square)
+        checkbox_points.InsertNextPoint(0, 0, 0)
+        checkbox_points.InsertNextPoint(1, 0, 0)
+        checkbox_points.InsertNextPoint(1, 1, 0)
+        checkbox_points.InsertNextPoint(0, 1, 0)
+        
+        # Create outline
+        checkbox_lines.InsertNextCell(5)
+        checkbox_lines.InsertCellPoint(0)
+        checkbox_lines.InsertCellPoint(1)
+        checkbox_lines.InsertCellPoint(2)
+        checkbox_lines.InsertCellPoint(3)
+        checkbox_lines.InsertCellPoint(0)
+        
+        # Add check mark if visible
+        if label in self.visible_labels:
+            # Check mark points
+            checkbox_points.InsertNextPoint(0.2, 0.5, 0)  # Point 4
+            checkbox_points.InsertNextPoint(0.4, 0.3, 0)  # Point 5
+            checkbox_points.InsertNextPoint(0.8, 0.7, 0)  # Point 6
+            
+            # Check mark lines
+            checkbox_lines.InsertNextCell(3)
+            checkbox_lines.InsertCellPoint(4)
+            checkbox_lines.InsertCellPoint(5)
+            checkbox_lines.InsertCellPoint(6)
+        
+        checkbox_polydata = vtk.vtkPolyData()
+        checkbox_polydata.SetPoints(checkbox_points)
+        checkbox_polydata.SetLines(checkbox_lines)
+        
+        checkbox_mapper = vtk.vtkPolyDataMapper2D()
+        checkbox_mapper.SetInputData(checkbox_polydata)
+        
+        checkbox_actor = vtk.vtkActor2D()
+        checkbox_actor.SetMapper(checkbox_mapper)
+        checkbox_actor.GetProperty().SetColor(0.9, 0.9, 0.9)  # Brighter color
+        checkbox_actor.GetProperty().SetLineWidth(3)  # Thicker lines
+        
+        # Position checkbox
+        checkbox_actor.GetPositionCoordinate().SetCoordinateSystemToNormalizedViewport()
+        checkbox_actor.GetPositionCoordinate().SetValue(x_pos, y_pos - size/2)
+        checkbox_actor.GetPosition2Coordinate().SetCoordinateSystemToNormalizedViewport()
+        checkbox_actor.GetPosition2Coordinate().SetValue(size, size)
+        
+        return checkbox_actor
+
+    def _create_text_actor(self, label: int, x_pos: float, y_pos: float, checkbox_size: float) -> vtk.vtkTextActor:
+        """Create a text actor with colored background for the legend."""
+        text_actor = vtk.vtkTextActor()
+        
+        # Add padding to the text
+        text_actor.SetInput(f" {self.label_names[label]} ")
+        text_actor.GetPositionCoordinate().SetCoordinateSystemToNormalizedViewport()
+        text_actor.SetPosition(x_pos + checkbox_size + 0.015, y_pos)
+        
+        # Style the text and its background
+        r, g, b = self.colors[label]
+        text_prop = text_actor.GetTextProperty()
+        text_prop.SetBackgroundColor(r, g, b)
+        text_prop.SetColor(1.0, 1.0, 1.0)  # White text
+        text_prop.SetFontSize(14)  # Larger font size
+        text_prop.SetFontFamilyToArial()
+        text_prop.SetJustificationToLeft()
+        text_prop.SetVerticalJustificationToCentered()
+        text_prop.SetBold(1)  # Make text bold for better visibility
+        
+        if label in self.visible_labels:
+            text_prop.SetBackgroundOpacity(1.0)
+        else:
+            text_prop.SetOpacity(0.3)
+            text_prop.SetBackgroundOpacity(0.3)
+        
+        return text_actor
+
     def to_vtk(self, opacity: float = 0.5, colors: Optional[Dict[int, Tuple[float, float, float]]] = None, **kw) -> List[vtk.vtkProp]:
         """
         Convert atlas to a VTK volume actor and an interactive legend.
@@ -95,6 +166,7 @@ class Atlas:
         --------
         List containing the volume actor and legend actors
         """
+        self._reset_view_state()
         if colors is not None:
             self.colors.update(colors)
         
@@ -140,166 +212,248 @@ class Atlas:
         self.vtk_volume = vtk.vtkVolume()
         self.vtk_volume.SetMapper(mapper)
         self.vtk_volume.SetProperty(volume_property)
+
+        # Create legend actors
+        legend_actors = []
         
-        legend_actors = self._create_interactive_legend()
+        # Starting position for the legend
+        x_pos = 0.82
+        y_start = 0.95
+        y_spacing = 0.055
+        checkbox_size = 0.05
         
+        for i, label in enumerate(self.unique_labels):
+            y_pos = y_start - i * y_spacing
+            
+            if y_pos < 0.05:  # Don't create widgets that would be off-screen
+                print("Warning: Too many labels to display all in the legend.")
+                break
+            
+            # Create checkbox actor
+            checkbox_actor = self._create_checkbox_actor(label, x_pos, y_pos, checkbox_size)
+            legend_actors.append(checkbox_actor)
+            
+            # Create text actor with colored background
+            text_actor = self._create_text_actor(label, x_pos, y_pos, checkbox_size)
+            legend_actors.append(text_actor)
+            
+            # Store actors for interaction
+            self.legend_items[label] = {
+                'checkbox': checkbox_actor,
+                'text': text_actor,
+                'bounds': (x_pos, y_pos - checkbox_size/2, 
+                          x_pos + 0.3, y_pos + checkbox_size/2)
+            }
+        
+        # Return all actors
         return [self.vtk_volume] + legend_actors
 
-    def _create_interactive_legend(self) -> List[vtk.vtkActor2D]:
-        """Create a clickable legend for toggling region visibility.
+    def setup_interaction(self, iren: vtk.vtkRenderWindowInteractor,
+                                ren:  vtk.vtkRenderer):
+        """Attach legend + click handler to an existing scene."""
+        # guard: reuse across scenes
+        if getattr(self, "_click_callback_id", None) is not None:
+            try: self.interactor.RemoveObserver(self._click_callback_id)
+            except RuntimeError: pass
 
-        Each entry is now a single `vtkTextActor` whose background is filled with
-        the colour assigned to the corresponding label.  The text itself is
-        rendered in black for readability.  We keep the same high-level layout
-        logic so that the previously implemented click detection continues to
-        work (bounds are stored per entry in `self.legend_bounds`).
-        """
+        self.interactor, self.renderer = iren, ren
+        if not self.legend_items:                # build legend once
+            self._create_checkbox_legend()
 
-        legend_actors: List[vtk.vtkActor2D] = []
+        self._click_callback_id = iren.AddObserver(
+            "LeftButtonPressEvent", self._on_click)
 
-        # Normalised viewport coordinates for the legend layout.
-        start_x = 0.82
-        start_y = 0.95
-        box_height = 0.04        # Height of each text box (in normalised units)
-        padding = 0.015          # Vertical padding between entries
-        entry_height = box_height + padding
-
+    def _create_checkbox_legend(self):
+        """Create checkbox-style legend with clickable elements."""
+        if not self.renderer:
+            return
+            
+        # Starting position for the legend
+        x_pos = 0.82  # Normalized viewport coordinates
+        y_start = 0.95
+        y_spacing = 0.055  # Increased spacing to accommodate larger checkboxes
+        checkbox_size = 0.05  # Made checkbox 67% larger
+        
         for i, label in enumerate(self.unique_labels):
-            y_pos = start_y - i * entry_height
-
-            # Do not draw entries that would fall off-screen.
+            y_pos = y_start - i * y_spacing
+            
+            # Don't create widgets that would be off-screen
             if y_pos < 0.05:
                 print("Warning: Too many labels to display all in the legend.")
                 break
-
-            # Text actor with coloured background.
+            
+            # Create checkbox (square outline with check mark)
+            checkbox_points = vtk.vtkPoints()
+            checkbox_lines = vtk.vtkCellArray()
+            
+            # Checkbox outline (square)
+            checkbox_points.InsertNextPoint(0, 0, 0)
+            checkbox_points.InsertNextPoint(1, 0, 0)
+            checkbox_points.InsertNextPoint(1, 1, 0)
+            checkbox_points.InsertNextPoint(0, 1, 0)
+            
+            # Create outline
+            checkbox_lines.InsertNextCell(5)
+            checkbox_lines.InsertCellPoint(0)
+            checkbox_lines.InsertCellPoint(1)
+            checkbox_lines.InsertCellPoint(2)
+            checkbox_lines.InsertCellPoint(3)
+            checkbox_lines.InsertCellPoint(0)
+            
+            # Add check mark if visible
+            if label in self.visible_labels:
+                # Check mark points
+                checkbox_points.InsertNextPoint(0.2, 0.5, 0)  # Point 4
+                checkbox_points.InsertNextPoint(0.4, 0.3, 0)  # Point 5
+                checkbox_points.InsertNextPoint(0.8, 0.7, 0)  # Point 6
+                
+                # Check mark lines
+                checkbox_lines.InsertNextCell(3)
+                checkbox_lines.InsertCellPoint(4)
+                checkbox_lines.InsertCellPoint(5)
+                checkbox_lines.InsertCellPoint(6)
+            
+            checkbox_polydata = vtk.vtkPolyData()
+            checkbox_polydata.SetPoints(checkbox_points)
+            checkbox_polydata.SetLines(checkbox_lines)
+            
+            checkbox_mapper = vtk.vtkPolyDataMapper2D()
+            checkbox_mapper.SetInputData(checkbox_polydata)
+            
+            checkbox_actor = vtk.vtkActor2D()
+            checkbox_actor.SetMapper(checkbox_mapper)
+            checkbox_actor.GetProperty().SetColor(0.9, 0.9, 0.9)  # Brighter color
+            checkbox_actor.GetProperty().SetLineWidth(3)  # Thicker lines
+            
+            # Position checkbox
+            checkbox_actor.GetPositionCoordinate().SetCoordinateSystemToNormalizedViewport()
+            checkbox_actor.GetPositionCoordinate().SetValue(x_pos, y_pos - checkbox_size/2)
+            checkbox_actor.GetPosition2Coordinate().SetCoordinateSystemToNormalizedViewport()
+            checkbox_actor.GetPosition2Coordinate().SetValue(checkbox_size, checkbox_size)
+            
+            self.renderer.AddActor2D(checkbox_actor)
+            
+            # Create text label with a colored background
             text_actor = vtk.vtkTextActor()
-            text_actor.SetInput(self.label_names[label])
-
-            # Position in normalised viewport coordinates.
+            
+            # Add padding to the text
+            text_actor.SetInput(f" {self.label_names[label]} ")
+            
             text_actor.GetPositionCoordinate().SetCoordinateSystemToNormalizedViewport()
-            text_actor.SetPosition(start_x, y_pos)
-
-            # Style the text and background.
-            text_prop = text_actor.GetTextProperty()
-            text_prop.SetColor(0.0, 0.0, 0.0)          # Black text
-            text_prop.SetFontSize(14)
-            text_prop.SetFontFamilyToArial()
-
+            text_actor.SetPosition(x_pos + checkbox_size + 0.015, y_pos)
+            
+            # Style the text and its background
             r, g, b = self.colors[label]
-
-            # Background colour matching the region colour.
-            # Depending on the VTK version, background is controlled either via
-            # the text property or directly on the actor.  We set both for
-            # maximum compatibility.
-            if hasattr(text_prop, "SetBackgroundColor"):
-                text_prop.SetBackgroundColor(r, g, b)
-                text_prop.SetBackgroundOpacity(1.0)
-            if hasattr(text_actor, "SetBackgroundColor"):
-                text_actor.SetBackgroundColor(r, g, b)
-                text_actor.SetBackgroundOpacity(1.0)
-
-            # Vertically centre the text inside its box.
+            text_prop = text_actor.GetTextProperty()
+            text_prop.SetBackgroundColor(r, g, b)
+            text_prop.SetColor(1.0, 1.0, 1.0)  # White text
+            text_prop.SetFontSize(14)  # Larger font size
+            text_prop.SetFontFamilyToArial()
+            text_prop.SetJustificationToLeft()
             text_prop.SetVerticalJustificationToCentered()
-
-            # Get the actual bounds of the text actor
-            text_actor.GetTextProperty().SetJustificationToLeft()
-            text_actor.GetTextProperty().SetVerticalJustificationToCentered()
+            text_prop.SetBold(1)  # Make text bold for better visibility
             
-            # Force the text actor to compute its bounds
-            text_actor.GetTextProperty().SetFontSize(14)
-            text_actor.GetTextProperty().SetFontFamilyToArial()
-            text_actor.GetTextProperty().SetBold(0)
-            text_actor.GetTextProperty().SetItalic(0)
-            text_actor.GetTextProperty().SetShadow(0)
-            text_actor.GetTextProperty().SetOpacity(1.0)
-            
-            # Get the actual bounds of the text actor
-            bounds = text_actor.GetBounds()
-            if bounds is not None:
-                # Convert bounds to normalized viewport coordinates
-                viewport = text_actor.GetViewport()
-                if viewport is not None:
-                    size = viewport.GetSize()
-                    if size[0] > 0 and size[1] > 0:
-                        x1 = bounds[0] / size[0]
-                        y1 = bounds[2] / size[1]
-                        x2 = bounds[1] / size[0]
-                        y2 = bounds[3] / size[1]
-                        # Add some padding to make clicking easier
-                        padding = 0.01
-                        self.legend_bounds[label] = (x1 - padding, y1 - padding, x2 + padding, y2 + padding)
-                    else:
-                        # Fallback to approximate bounds if viewport size is not available
-                        self.legend_bounds[label] = (start_x, y_pos, 0.99, y_pos + box_height)
-                else:
-                    # Fallback to approximate bounds if viewport is not available
-                    self.legend_bounds[label] = (start_x, y_pos, 0.99, y_pos + box_height)
+            if label in self.visible_labels:
+                text_prop.SetBackgroundOpacity(1.0)
             else:
-                # Fallback to approximate bounds if bounds are not available
-                self.legend_bounds[label] = (start_x, y_pos, 0.99, y_pos + box_height)
+                text_prop.SetOpacity(0.3)
+                text_prop.SetBackgroundOpacity(0.3)
+            
+            self.renderer.AddActor2D(text_actor)
+            
+            # Store all actors and bounds for this label
+            self.legend_items[label] = {
+                'checkbox': checkbox_actor,
+                'text': text_actor,
+                'bounds': (x_pos, y_pos - checkbox_size/2, 
+                           x_pos + 0.3, y_pos + checkbox_size/2)  # Clickable area
+            }
 
-            legend_actors.append(text_actor)
-
-        return legend_actors
-
-    def setup_interaction(self, interactor: vtk.vtkRenderWindowInteractor):
-        """Set up the interaction callback for the legend."""
-        self.interactor = interactor
-        self._click_callback_id = self.interactor.AddObserver(
-            "LeftButtonPressEvent", self._on_legend_click
-        )
-
-    def _on_legend_click(self, obj, event):
-        """Handle clicks on the legend to toggle visibility."""
+    def _on_click(self, obj, event):
+        """Handle click events on the legend."""
         try:
             click_pos = self.interactor.GetEventPosition()
             renderer = self.interactor.FindPokedRenderer(click_pos[0], click_pos[1])
             
-            # Convert display coordinates to normalized viewport coordinates
             if renderer is None:
-                print("Warning: No renderer found at click position")
                 return
                 
             size = renderer.GetSize()
             if size[0] == 0 or size[1] == 0:
-                print("Warning: Invalid renderer size")
                 return
                 
             norm_x = click_pos[0] / size[0]
             norm_y = click_pos[1] / size[1]
             
-            # Debug print for click position
-            print(f"Click at normalized coordinates: ({norm_x:.3f}, {norm_y:.3f})")
-            
-            # Check each label's bounds with a small tolerance
-            tolerance = 0.005
-            for label, (x1, y1, x2, y2) in self.legend_bounds.items():
-                if (x1 - tolerance <= norm_x <= x2 + tolerance and 
-                    y1 - tolerance <= norm_y <= y2 + tolerance):
-                    print(f"Click detected on label {label}: {self.label_names[label]}")
+            # Check each label's bounds
+            for label, item in self.legend_items.items():
+                x1, y1, x2, y2 = item['bounds']
+                if x1 <= norm_x <= x2 and y1 <= norm_y <= y2:
                     self.toggle_label_visibility(label)
                     return
                     
-            print("No label bounds matched the click position")
-            
         except Exception as e:
-            print(f"Error in legend click handler: {str(e)}")
+            print(f"Error in click handler: {str(e)}")
 
     def toggle_label_visibility(self, label: int):
         """Toggle the visibility of a specific label."""
-        current_opacity = self.opacity_tf.GetValue(label)
-        if current_opacity > 0:
+        if label in self.visible_labels:
+            # Hide the region
             self.opacity_tf.AddPoint(label, 0)
-            if label in self.visible_labels:
-                self.visible_labels.remove(label)
+            self.visible_labels.remove(label)
+            visible = False
         else:
-            # Restore to default opacity (from to_vtk)
+            # Show the region
             self.opacity_tf.AddPoint(label, 0.5)
             self.visible_labels.add(label)
+            visible = True
+        
+        # Update checkbox appearance
+        if label in self.legend_items:
+            item = self.legend_items[label]
             
-        self.opacity_tf.Modified()
-        self.interactor.GetRenderWindow().Render()
+            # Update checkbox with or without check mark
+            checkbox_points = vtk.vtkPoints()
+            checkbox_lines = vtk.vtkCellArray()
+            
+            # Checkbox outline
+            checkbox_points.InsertNextPoint(0, 0, 0)
+            checkbox_points.InsertNextPoint(1, 0, 0)
+            checkbox_points.InsertNextPoint(1, 1, 0)
+            checkbox_points.InsertNextPoint(0, 1, 0)
+            
+            checkbox_lines.InsertNextCell(5)
+            checkbox_lines.InsertCellPoint(0)
+            checkbox_lines.InsertCellPoint(1)
+            checkbox_lines.InsertCellPoint(2)
+            checkbox_lines.InsertCellPoint(3)
+            checkbox_lines.InsertCellPoint(0)
+            
+            if visible:
+                # Add check mark
+                checkbox_points.InsertNextPoint(0.2, 0.5, 0)
+                checkbox_points.InsertNextPoint(0.4, 0.3, 0)
+                checkbox_points.InsertNextPoint(0.8, 0.7, 0)
+                
+                checkbox_lines.InsertNextCell(3)
+                checkbox_lines.InsertCellPoint(4)
+                checkbox_lines.InsertCellPoint(5)
+                checkbox_lines.InsertCellPoint(6)
+            
+            checkbox_polydata = vtk.vtkPolyData()
+            checkbox_polydata.SetPoints(checkbox_points)
+            checkbox_polydata.SetLines(checkbox_lines)
+            
+            item['checkbox'].GetMapper().SetInputData(checkbox_polydata)
+            
+            # Update opacity of text and its background
+            opacity = 1.0 if visible else 0.3
+            text_prop = item['text'].GetTextProperty()
+            text_prop.SetOpacity(opacity)
+            text_prop.SetBackgroundOpacity(opacity)
+        
+        if hasattr(self, 'interactor') and self.interactor is not None:
+            self.interactor.GetRenderWindow().Render()
 
     def _create_legend(self) -> vtk.vtkLegendBoxActor:
         """Create a legend showing region colors and names."""
@@ -353,6 +507,14 @@ class Atlas:
         legend.GetEntryTextProperty().SetFontFamilyToArial()
         
         return legend
+
+    def _reset_view_state(self):
+        """Forget all per‑scene interaction state (legend, visibility, TF, actors)."""
+        self.visible_labels = set(self.unique_labels)      # everything visible
+        self.legend_items   = {}                           # no stale actors
+        self.opacity_tf     = vtk.vtkPiecewiseFunction()   # fresh TF
+        self.vtk_volume     = None                         # will be rebuilt
+
     
     def apply_style(self, actor: vtk.vtkActor, opacity: Optional[float] = None, 
                    colors: Optional[Dict[int, Tuple[float, float, float]]] = None, **kw):
@@ -385,6 +547,7 @@ class Atlas:
             # Trigger update
             lut.Modified()
             actor.GetMapper().Modified()
+
 
 if __name__ == "__main__":
     import nibabel as nib

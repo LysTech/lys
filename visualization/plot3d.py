@@ -17,7 +17,6 @@ class _Handle:
     style: Dict[str, Any] = field(default_factory=dict)
 
 class VTKScene:
-    """Simplified scene - no more single dispatch needed!"""
     
     def __init__(self):
         # Core renderer and bookkeeping
@@ -29,6 +28,7 @@ class VTKScene:
         self._objects: Dict[int, Any] = {}  # strong refs – no GC until removed
         self._timeseries_objects: Dict[int, Any] = {}
         self._current_global_timepoint = 0
+        self._need_interaction: List[Any] = []
 
         # Qt / VTK windowing bits – created lazily in ``show``
         self._qt_app: Optional[QtWidgets.QApplication] = None
@@ -77,6 +77,13 @@ class VTKScene:
                        for w in self._qt_window.centralWidget().findChildren(QtWidgets.QSlider)):
                 slider = self._create_timeseries_slider(self._qt_window)
                 self._qt_window.centralWidget().layout().addWidget(slider, stretch=0)
+        
+        if hasattr(obj, "setup_interaction"):
+            if self._qt_window is None:          # window not yet built
+                self._need_interaction.append(obj)
+            else:                                # window already open
+                obj.setup_interaction(self._qt_window.vtkWidget,
+                                       self._ren)
 
         return self
 
@@ -169,25 +176,26 @@ class VTKScene:
             print(f"Warning: Could not enable Qt integration: {e}")
             print("You may need to run '%gui qt' manually in Jupyter/IPython")
 
-    def show(
-        self,
-        size: Tuple[int, int] = (800, 600),
-        title: str = "VTK Scene",
-        block: bool = False,
-    ) -> "VTKScene":
-        """Open a Qt window with the scene."""
-        # Enable Qt integration in Jupyter/IPython if available
-        self._enable_qt_integration()
-        
-        self._ensure_qt_app()
 
+    def show(self, size=(800, 600), title="VTK Scene", block=False):
+        """Open a Qt window with the scene."""
+        # 1 — make sure a Qt application exists *first*
+        self._enable_qt_integration()     # Jupyter “%gui qt5”, optional
+        self._ensure_qt_app()             # creates / fetches QApplication
+
+        # 2 — create (or reuse) the main window **after** QApplication
         if self._qt_window is None:
             self._qt_window = _SceneWindow(self, size, title)
         else:
             self._qt_window.resize(*size)
             self._qt_window.setWindowTitle(title)
 
-        # Fit camera & first render *before* showing → no white flash
+        # 3 — hand the ready‑made interactor to objects that asked for it
+        for obj in self._need_interaction:
+            obj.setup_interaction(self._qt_window.vtkWidget, self._ren)
+        self._need_interaction.clear()
+
+        # 4 — first render & show
         self._ren.ResetCamera()
         self._qt_window.vtkWidget.GetRenderWindow().Render()
         self._qt_window.show()
