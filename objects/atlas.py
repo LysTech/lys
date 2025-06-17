@@ -71,86 +71,6 @@ class Atlas:
             rgb = colorsys.hsv_to_rgb(hue, 0.8, 0.9)
             self.colors[label] = rgb
     
-    def _create_checkbox_actor(self, label: int, x_pos: float, y_pos: float, size: float) -> vtk.vtkActor2D:
-        """Create a checkbox actor for the legend."""
-        checkbox_points = vtk.vtkPoints()
-        checkbox_lines = vtk.vtkCellArray()
-        
-        # Checkbox outline (square)
-        checkbox_points.InsertNextPoint(0, 0, 0)
-        checkbox_points.InsertNextPoint(1, 0, 0)
-        checkbox_points.InsertNextPoint(1, 1, 0)
-        checkbox_points.InsertNextPoint(0, 1, 0)
-        
-        # Create outline
-        checkbox_lines.InsertNextCell(5)
-        checkbox_lines.InsertCellPoint(0)
-        checkbox_lines.InsertCellPoint(1)
-        checkbox_lines.InsertCellPoint(2)
-        checkbox_lines.InsertCellPoint(3)
-        checkbox_lines.InsertCellPoint(0)
-        
-        # Add check mark if visible
-        if label in self.visible_labels:
-            # Check mark points
-            checkbox_points.InsertNextPoint(0.2, 0.5, 0)  # Point 4
-            checkbox_points.InsertNextPoint(0.4, 0.3, 0)  # Point 5
-            checkbox_points.InsertNextPoint(0.8, 0.7, 0)  # Point 6
-            
-            # Check mark lines
-            checkbox_lines.InsertNextCell(3)
-            checkbox_lines.InsertCellPoint(4)
-            checkbox_lines.InsertCellPoint(5)
-            checkbox_lines.InsertCellPoint(6)
-        
-        checkbox_polydata = vtk.vtkPolyData()
-        checkbox_polydata.SetPoints(checkbox_points)
-        checkbox_polydata.SetLines(checkbox_lines)
-        
-        checkbox_mapper = vtk.vtkPolyDataMapper2D()
-        checkbox_mapper.SetInputData(checkbox_polydata)
-        
-        checkbox_actor = vtk.vtkActor2D()
-        checkbox_actor.SetMapper(checkbox_mapper)
-        checkbox_actor.GetProperty().SetColor(0.9, 0.9, 0.9)  # Brighter color
-        checkbox_actor.GetProperty().SetLineWidth(3)  # Thicker lines
-        
-        # Position checkbox
-        checkbox_actor.GetPositionCoordinate().SetCoordinateSystemToNormalizedViewport()
-        checkbox_actor.GetPositionCoordinate().SetValue(x_pos, y_pos - size/2)
-        checkbox_actor.GetPosition2Coordinate().SetCoordinateSystemToNormalizedViewport()
-        checkbox_actor.GetPosition2Coordinate().SetValue(size, size)
-        
-        return checkbox_actor
-
-    def _create_text_actor(self, label: int, x_pos: float, y_pos: float, checkbox_size: float) -> vtk.vtkTextActor:
-        """Create a text actor with colored background for the legend."""
-        text_actor = vtk.vtkTextActor()
-        
-        # Add padding to the text
-        text_actor.SetInput(f" {self.label_names[label]} ")
-        text_actor.GetPositionCoordinate().SetCoordinateSystemToNormalizedViewport()
-        text_actor.SetPosition(x_pos + checkbox_size + 0.015, y_pos)
-        
-        # Style the text and its background
-        r, g, b = self.colors[label]
-        text_prop = text_actor.GetTextProperty()
-        text_prop.SetBackgroundColor(r, g, b)
-        text_prop.SetColor(1.0, 1.0, 1.0)  # White text
-        text_prop.SetFontSize(14)  # Larger font size
-        text_prop.SetFontFamilyToArial()
-        text_prop.SetJustificationToLeft()
-        text_prop.SetVerticalJustificationToCentered()
-        text_prop.SetBold(1)  # Make text bold for better visibility
-        
-        if label in self.visible_labels:
-            text_prop.SetBackgroundOpacity(1.0)
-        else:
-            text_prop.SetOpacity(0.3)
-            text_prop.SetBackgroundOpacity(0.3)
-        
-        return text_actor
-
     def to_vtk(self, opacity: float = 0.5, colors: Optional[Dict[int, Tuple[float, float, float]]] = None, **kw) -> List[vtk.vtkProp]:
         """
         Convert atlas to a VTK volume actor and an interactive legend.
@@ -247,6 +167,115 @@ class Atlas:
         
         # Return all actors
         return [self.vtk_volume] + legend_actors
+    
+    def apply_style(self, actor: vtk.vtkActor, opacity: Optional[float] = None, 
+                   colors: Optional[Dict[int, Tuple[float, float, float]]] = None, **kw):
+        """
+        Apply styling to existing VTK actor.
+        
+        Parameters:
+        -----------
+        actor : vtk.vtkActor
+            The actor to update
+        opacity : float, optional
+            New opacity value
+        colors : dict, optional
+            New color mapping for regions {label: (r, g, b)}
+        """
+        if opacity is not None:
+            # For volume data, update the opacity transfer function
+            if isinstance(actor, vtk.vtkVolume):
+                volume_property = actor.GetProperty()
+                opacity_tf = volume_property.GetScalarOpacity()
+                # Update opacity for all visible labels
+                for label in self.visible_labels:
+                    opacity_tf.AddPoint(label, opacity)
+                opacity_tf.Modified()
+            else:
+                # For other types of actors
+                actor.GetProperty().SetOpacity(opacity)
+        
+
+    def _create_checkbox_actor(self, label: int, x_pos: float, y_pos: float, size: float) -> vtk.vtkActor2D:
+        """Create a checkbox actor for the legend."""
+        checkbox_points = vtk.vtkPoints()
+        checkbox_lines = vtk.vtkCellArray()
+        
+        # Checkbox outline (square)
+        checkbox_points.InsertNextPoint(0, 0, 0)
+        checkbox_points.InsertNextPoint(1, 0, 0)
+        checkbox_points.InsertNextPoint(1, 1, 0)
+        checkbox_points.InsertNextPoint(0, 1, 0)
+        
+        # Create outline
+        checkbox_lines.InsertNextCell(5)
+        checkbox_lines.InsertCellPoint(0)
+        checkbox_lines.InsertCellPoint(1)
+        checkbox_lines.InsertCellPoint(2)
+        checkbox_lines.InsertCellPoint(3)
+        checkbox_lines.InsertCellPoint(0)
+        
+        # Add check mark if visible
+        if label in self.visible_labels:
+            # Check mark points
+            checkbox_points.InsertNextPoint(0.2, 0.5, 0)  # Point 4
+            checkbox_points.InsertNextPoint(0.4, 0.3, 0)  # Point 5
+            checkbox_points.InsertNextPoint(0.8, 0.7, 0)  # Point 6
+            
+            # Check mark lines
+            checkbox_lines.InsertNextCell(3)
+            checkbox_lines.InsertCellPoint(4)
+            checkbox_lines.InsertCellPoint(5)
+            checkbox_lines.InsertCellPoint(6)
+        
+        checkbox_polydata = vtk.vtkPolyData()
+        checkbox_polydata.SetPoints(checkbox_points)
+        checkbox_polydata.SetLines(checkbox_lines)
+        
+        checkbox_mapper = vtk.vtkPolyDataMapper2D()
+        checkbox_mapper.SetInputData(checkbox_polydata)
+        
+        checkbox_actor = vtk.vtkActor2D()
+        checkbox_actor.SetMapper(checkbox_mapper)
+        checkbox_actor.GetProperty().SetColor(0.9, 0.9, 0.9)  # Brighter color
+        checkbox_actor.GetProperty().SetLineWidth(3)  # Thicker lines
+        
+        # Position checkbox
+        checkbox_actor.GetPositionCoordinate().SetCoordinateSystemToNormalizedViewport()
+        checkbox_actor.GetPositionCoordinate().SetValue(x_pos, y_pos - size/2)
+        checkbox_actor.GetPosition2Coordinate().SetCoordinateSystemToNormalizedViewport()
+        checkbox_actor.GetPosition2Coordinate().SetValue(size, size)
+        
+        return checkbox_actor
+
+    def _create_text_actor(self, label: int, x_pos: float, y_pos: float, checkbox_size: float) -> vtk.vtkTextActor:
+        """Create a text actor with colored background for the legend."""
+        text_actor = vtk.vtkTextActor()
+        
+        # Add padding to the text
+        text_actor.SetInput(f" {self.label_names[label]} ")
+        text_actor.GetPositionCoordinate().SetCoordinateSystemToNormalizedViewport()
+        text_actor.SetPosition(x_pos + checkbox_size + 0.015, y_pos)
+        
+        # Style the text and its background
+        r, g, b = self.colors[label]
+        text_prop = text_actor.GetTextProperty()
+        text_prop.SetBackgroundColor(r, g, b)
+        text_prop.SetColor(1.0, 1.0, 1.0)  # White text
+        text_prop.SetFontSize(14)  # Larger font size
+        text_prop.SetFontFamilyToArial()
+        text_prop.SetJustificationToLeft()
+        text_prop.SetVerticalJustificationToCentered()
+        text_prop.SetBold(1)  # Make text bold for better visibility
+        
+        if label in self.visible_labels:
+            text_prop.SetBackgroundOpacity(1.0)
+        else:
+            text_prop.SetOpacity(0.3)
+            text_prop.SetBackgroundOpacity(0.3)
+        
+        return text_actor
+
 
     def setup_interaction(self, iren: vtk.vtkRenderWindowInteractor,
                                 ren:  vtk.vtkRenderer):
@@ -515,67 +544,3 @@ class Atlas:
         self.opacity_tf     = vtk.vtkPiecewiseFunction()   # fresh TF
         self.vtk_volume     = None                         # will be rebuilt
 
-    
-    def apply_style(self, actor: vtk.vtkActor, opacity: Optional[float] = None, 
-                   colors: Optional[Dict[int, Tuple[float, float, float]]] = None, **kw):
-        """
-        Apply styling to existing VTK actor.
-        
-        Parameters:
-        -----------
-        actor : vtk.vtkActor
-            The actor to update
-        opacity : float, optional
-            New opacity value
-        colors : dict, optional
-            New color mapping for regions {label: (r, g, b)}
-        """
-        if opacity is not None:
-            # For volume data, update the opacity transfer function
-            if isinstance(actor, vtk.vtkVolume):
-                volume_property = actor.GetProperty()
-                opacity_tf = volume_property.GetScalarOpacity()
-                # Update opacity for all visible labels
-                for label in self.visible_labels:
-                    opacity_tf.AddPoint(label, opacity)
-                opacity_tf.Modified()
-            else:
-                # For other types of actors
-                actor.GetProperty().SetOpacity(opacity)
-        
-        if colors is not None and hasattr(actor, '_lut'):
-            # Update stored colors
-            if hasattr(actor, '_colors'):
-                actor._colors.update(colors)
-            
-            # Update lookup table
-            lut = actor._lut
-            for label, (r, g, b) in colors.items():
-                if label in self.unique_labels:
-                    lut.SetTableValue(int(label), r, g, b, 1.0)
-            
-            # Trigger update
-            lut.Modified()
-            actor.GetMapper().Modified()
-
-
-if __name__ == "__main__":
-    import nibabel as nib
-    import numpy as np
-
-    atlas_path = '/Users/thomasrialan/Documents/code/Geometric-Eigenmodes/data/P03/anat/volumes/BA_reproject_in_T1_rigid.nii.gz'
-    atlas_img = nib.load(atlas_path)
-
-    # Load atlas data
-    atlas_data = atlas_img.get_fdata().astype(np.int32)
-    metadata = {
-        'spacing': atlas_img.header.get_zooms()[:3],
-        'origin': atlas_img.affine[:3, 3]
-    }
-
-    # Create label names
-    unique_labels = np.unique(atlas_data)
-    label_names = {label: f"BA {label}" for label in unique_labels if label != 0}
-
-    # Create and display atlas
-    atlas = Atlas(atlas_data, metadata, label_names)

@@ -54,3 +54,12 @@ scene.show()
 scene.style(time_series_mesh, opacity=0.5, cmap="viridis") #change the opacity and/or cmap
 ```
 
+StaticDataMesh and TimeSeriesDataMesh styles can be changed with: new opacities, new colormaps.
+
+
+### Atlases
+Atlases work the same, their opacity can be updated. 
+
+### Points / Optodes
+Their radius can be updated, as can their color (with an RGB tuple like `(0,0,1)`).
+
