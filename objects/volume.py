@@ -89,7 +89,7 @@ class Volume:
                 if hasattr(actor, '_scalar_bar'):
                     actor._scalar_bar.SetLookupTable(lut)
 
-def from_jnii(file_path: str) -> Volume:
+def from_jnii(file_path: str, **kwargs) -> Volume:
     with open(file_path, "r") as f:
         raw = json.load(f)
 
@@ -97,4 +97,4 @@ def from_jnii(file_path: str) -> Volume:
     volumeData = volumeData.reshape(raw["struct"]["NIFTIHeader"]["Dim"])
     print("Volume data gets divide by 50.")
     volumeData = volumeData / 50.0
-    return Volume(volumeData)
+    return Volume(volumeData, **kwargs)
