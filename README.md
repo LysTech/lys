@@ -6,17 +6,17 @@
 ```
 lys/
 ├── objects/
-│   ├── atlas.py        # Atlas-related functionality
-│   ├── mesh.py         # Core mesh classes and functionality
-│   ├── volume.py       # Volume data handling
+│   ├── atlas.py   
+│   ├── mesh.py       
+│   ├── volume.py     
 │   └── __init__.py
 ├── utils/
-│   ├── paths.py        # Path utilities
-│   └── strings.py      # String utilities
+│   ├── paths.py   
+│   └── strings.py
 ├── visualization/
-│   ├── plot3d.py       # VTK-based 3D visualization
-│   └── utils.py        # Visualization utilities
-└── tests/              # Test suite
+│   ├── plot3d.py 
+│   └── utils.py
+└── tests/  
 ```
 
 
