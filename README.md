@@ -5,8 +5,6 @@
 - [Project Structure](#project-structure)
 - [Documentation](#documentation)
   - [Visualization](#visualization)
-  - [Working with Time-Series Data](#working-with-time-series-data)
-  - [Style Options by Object Type](#style-options-by-object-type)
 - [Data Directory Setup](#data-directory-setup)
 - [Data Folder Structure](#data-folder-structure)
 
