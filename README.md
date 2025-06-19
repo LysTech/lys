@@ -62,7 +62,7 @@ By default we use the full range of the colormap, so if you pass values between 
 scene.style(static_data_mesh, cmap="inferno")
 ```
 
-### Working with Time-Series Data
+#### Working with Time-Series Data
 ```python
 scene = VTKScene()
 scene.add(time_series_mesh)
@@ -72,7 +72,7 @@ scene.style(time_series_mesh, opacity=0.5, cmap="viridis") #change the opacity a
 
 StaticDataMesh and TimeSeriesDataMesh styles can be changed with: new opacities, new colormaps.
 
-### Style Options by Object Type
+#### Style Options by Object Type
 
 | Type                | Style Updates (arguments to `apply_style`)                |
 |---------------------|----------------------------------------------------------|
