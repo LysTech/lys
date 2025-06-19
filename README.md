@@ -10,6 +10,9 @@ lys/
 │   ├── mesh.py         # Core mesh classes and functionality
 │   ├── volume.py       # Volume data handling
 │   └── __init__.py
+├── utils/
+│   ├── paths.py        # Path utilities
+│   └── strings.py      # String utilities
 ├── visualization/
 │   ├── plot3d.py       # VTK-based 3D visualization
 │   └── utils.py        # Visualization utilities
@@ -79,4 +82,49 @@ StaticDataMesh and TimeSeriesDataMesh styles can be changed with: new opacities,
 - For `Mesh`, you can update opacity.
 - For `StaticMeshData`, you can update opacity and colormap.
 - For `TimeSeriesMeshData`, you can update opacity and colormap (applies to the current timepoint's data).
+
+
+## Data Directory Setup
+
+Before using Lys, you must set the `LYS_DATA_DIR` environment variable in your shell configuration (e.g., `.bashrc`, `.zshrc`). This variable should point to the root directory where your data is stored. For example:
+
+```bash
+LYS_DATA_DIR="/Users/thomasrialan/Documents/code/Geometric-Eigenmodes/data"
+export LYS_DATA_DIR
+```
+
+Make sure to restart your terminal or source your shell configuration after making this change:
+
+```bash
+source ~/.bashrc  # or source ~/.zshrc
+```
+
+## Data Folder Structure
+
+Your data directory should be organized as follows:
+
+```
+subject/
+├── anat/
+│   ├── volumes/
+│   │   ├── MRI/
+│   │   └── segmentations/
+│   └── meshes/
+├── derivatives/
+│   └── jacobians/
+│       └── sub-001_jacobian.h5  # Actual file stored once
+└── nirs/
+    └── experiment/
+        ├── session1/
+        │   ├── (symlink) sub-001_jacobian.h5 -> ../../derivatives/jacobians/sub-001_jacobian.h5 
+        │   ├── sub-001_optodes.some_format
+        │   ├── data.snirf
+        │   ├── protocol.prt
+        │   └── processed_session1_v1
+        └── session2/
+            ├── (symlink) sub-001_jacobian.h5 -> ../../derivatives/jacobians/sub-001_jacobian.h5
+            ├── sub-001_optodes.some_format
+            ├── data.snirf
+            └── protocol.prt
+```
 
