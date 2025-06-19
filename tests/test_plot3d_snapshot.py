@@ -1,0 +1,138 @@
+import os
+import numpy as np
+from PIL import Image, ImageChops
+import pytest
+import shutil
+
+from lys.objects.mesh import from_mat
+from lys.visualization.plot3d import VTKScene
+from lys.utils.paths import lys_data_dir
+from lys.objects.segmentation import load_charm_segmentation
+from lys.objects.optodes import Points
+from lys.objects.mesh import TimeSeriesMeshData
+
+"""
+Snapshot tests: plot an object, take screenshot on first test run, then compare to saved image pixel by pixel in future tests.
+"""
+
+SNAPSHOT_DIR = os.path.join(os.path.dirname(__file__), "snapshots")
+FAILED_SNAPSHOT_DIR = os.path.join(SNAPSHOT_DIR, "failed")
+
+def compare_images(img1_path, img2_path, tolerance=5):
+    """Compare two images pixel-by-pixel. Returns True if they are the same within tolerance.
+        Tolerance of 5 is conservative, max diff would be 255"""
+    img1 = Image.open(img1_path).convert("RGB")
+    img2 = Image.open(img2_path).convert("RGB")
+    diff = ImageChops.difference(img1, img2)
+    np_diff = np.array(diff)
+    max_diff = np.max(np_diff)
+    return max_diff <= tolerance
+
+
+def test_mesh_snapshot(tmp_path):
+    """Test that rendering a mesh produces the expected image."""
+    # Arrange
+    mesh_path = os.path.join(lys_data_dir(), "P03/anat/meshes/P03_EIGMOD_MPR_IIHC_MNI_WM_LH_edited_again_RECOSM_D32k.mat")
+    mesh = from_mat(mesh_path, show=False)
+    scene = VTKScene()
+    scene.add(mesh)
+    out_path = tmp_path / "mesh.png"
+    snapshot_path = os.path.join(SNAPSHOT_DIR, "mesh.png")
+
+    # Act
+    scene.screenshot(str(out_path), size=(400, 400))
+
+    # Assert
+    if not os.path.exists(snapshot_path):
+        # First run: save the snapshot
+        os.rename(out_path, snapshot_path)
+        pytest.skip("Snapshot created, rerun the test to compare.")
+    else:
+        assert compare_images(out_path, snapshot_path), "Rendered image does not match snapshot."
+
+
+def test_atlas_snapshot(tmp_path):
+    """Test that rendering an atlas segmentation produces the expected image."""
+    seg = load_charm_segmentation("P03", show=False)
+    scene = VTKScene()
+    scene.add(seg)
+    out_path = tmp_path / "atlas.png"
+    snapshot_path = os.path.join(SNAPSHOT_DIR, "atlas.png")
+    scene.screenshot(str(out_path), size=(600, 600))
+    if not os.path.exists(snapshot_path):
+        os.rename(out_path, snapshot_path)
+        pytest.skip("Snapshot created, rerun the test to compare.")
+    else:
+        assert compare_images(out_path, snapshot_path), "Rendered image does not match snapshot."
+
+
+def test_optodes_snapshot(tmp_path):
+    """Test that rendering a set of optodes (Points) produces the expected image."""
+    coordinates = [
+        (10.0, 20.0, 30.0),
+        (40.0, 50.0, 60.0),
+        (70.0, 80.0, 90.0),
+        (25.0, 35.0, 45.0),
+        (55.0, 65.0, 75.0)
+    ]
+    points = Points(coordinates)
+    scene = VTKScene()
+    scene.add(points)
+    out_path = tmp_path / "optodes.png"
+    snapshot_path = os.path.join(SNAPSHOT_DIR, "optodes.png")
+    scene.screenshot(str(out_path), size=(400, 400))
+    if not os.path.exists(snapshot_path):
+        os.rename(out_path, snapshot_path)
+        pytest.skip("Snapshot created, rerun the test to compare.")
+    else:
+        assert compare_images(out_path, snapshot_path), "Rendered image does not match snapshot."
+
+
+def test_atlas_dynamic_legend(tmp_path):
+    """
+    Test dynamic legend interaction for Atlas:
+    - Initial state: all labels visible (compare to atlas.png)
+    - Hide a label: compare to new snapshot
+    - Show the label again: should match initial snapshot
+    """
+    # Arrange
+    seg = load_charm_segmentation("P03", show=False)
+    scene = VTKScene()
+    scene.add(seg)
+    out_path = tmp_path / "atlas.png"
+    snapshot_path = os.path.join(SNAPSHOT_DIR, "atlas.png")
+    label_to_toggle = 5  # This is the outer layer, so it should be visible when we un-tick
+
+    # --- Initial state ---
+    scene.screenshot(str(out_path), size=(600, 600))
+    assert compare_images(out_path, snapshot_path), "Initial atlas render does not match snapshot."
+
+    # --- Hide label ---
+    seg.toggle_label_visibility(label_to_toggle)
+    out_path_hidden = tmp_path / f"atlas_label{label_to_toggle}_hidden.png"
+    snapshot_path_hidden = os.path.join(SNAPSHOT_DIR, f"atlas_label{label_to_toggle}_hidden.png")
+    scene.screenshot(str(out_path_hidden), size=(600, 600))
+    if not os.path.exists(snapshot_path_hidden):
+        os.rename(out_path_hidden, snapshot_path_hidden)
+        pytest.skip("Dynamic snapshot created, rerun the test to compare.")
+    else:
+        assert compare_images(out_path_hidden, snapshot_path_hidden), "Atlas with label hidden does not match snapshot."
+
+    # --- Show label again ---
+    seg.toggle_label_visibility(label_to_toggle)
+    out_path_restored = tmp_path / f"atlas_label{label_to_toggle}_restored.png"
+    scene.screenshot(str(out_path_restored), size=(600, 600))
+    # Should match the original snapshot
+    assert compare_images(out_path_restored, snapshot_path), "Atlas after re-showing label does not match original snapshot."
+
+
+@pytest.fixture(scope="session", autouse=True)
+def clean_failed_snapshots():
+    """Empty the 'snapshots/failed' directory before any tests run."""
+    if os.path.exists(FAILED_SNAPSHOT_DIR):
+        for filename in os.listdir(FAILED_SNAPSHOT_DIR):
+            file_path = os.path.join(FAILED_SNAPSHOT_DIR, filename)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+    else:
+        os.makedirs(FAILED_SNAPSHOT_DIR, exist_ok=True)

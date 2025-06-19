@@ -1,6 +1,6 @@
 import vtk
 import numpy as np
-from matplotlib import cm
+import matplotlib
 from typing import Dict
 
 _custom_colormaps: Dict[str, vtk.vtkLookupTable] = {}
@@ -20,7 +20,7 @@ def get_vtk_colormap(name: str, n_colors: int = 256) -> vtk.vtkLookupTable:
     
     # Fallback to matplotlib
     try:
-        colormap = cm.get_cmap(name)
+        colormap = matplotlib.colormaps[name]
     except ValueError:
         raise ValueError(
             f"Unknown colormap: '{name}'. It is not a registered custom "

@@ -1,6 +1,5 @@
 # Lys
 
-
 ## Project Structure
 
 ```
@@ -20,7 +19,7 @@ lys/
 ```
 
 
-## Usage Examples
+## Documentation
 
 ### Visualization
 

@@ -3,12 +3,14 @@ from lys.objects.mesh import from_mat, StaticMeshData, TimeSeriesMeshData
 from lys.objects.segmentation import load_charm_segmentation
 from lys.objects.optodes import Points
 from lys.visualization.plot3d import VTKScene
+from lys.utils.paths import lys_data_dir
+import os
 
 # Construct a volume
 seg = load_charm_segmentation("P03")
 
 # Construct a mesh
-mesh_file = "../Geometric-Eigenmodes/data/P03/anat/meshes/P03_EIGMOD_MPR_IIHC_MNI_WM_LH_edited_again_RECOSM_D32k.mat"
+mesh_file = os.path.join(lys_data_dir(), "P03/anat/meshes/P03_EIGMOD_MPR_IIHC_MNI_WM_LH_edited_again_RECOSM_D32k.mat")
 mesh = from_mat(mesh_file)
 
 # Plot a timeseries on the mesh

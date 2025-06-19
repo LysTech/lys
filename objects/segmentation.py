@@ -10,12 +10,12 @@ from lys.utils.paths import lys_data_dir, check_file_exists
 from lys.utils.strings import validate_patient_string
 
 
-def load_charm_segmentation(patient: str) -> Atlas:
+def load_charm_segmentation(patient: str, show: bool = True) -> Atlas:
     validate_patient_string(patient)
     path = _segmentation_path(patient)
     check_file_exists(path)
     volume = from_jnii(path, show=False)
-    return Atlas(volume.array.astype(np.int32))
+    return Atlas(volume.array.astype(np.int32), show=show)
 
 
 def _segmentation_path(patient: str) -> str:
