@@ -45,7 +45,6 @@ By default we use the full range of the colormap, so if you pass values between 
 scene.style(static_data_mesh, cmap="inferno")
 ```
 
-
 ### Working with Time-Series Data
 ```python
 scene = VTKScene()
@@ -56,10 +55,29 @@ scene.style(time_series_mesh, opacity=0.5, cmap="viridis") #change the opacity a
 
 StaticDataMesh and TimeSeriesDataMesh styles can be changed with: new opacities, new colormaps.
 
-
 ### Atlases
 Atlases work the same, their opacity can be updated. 
 
 ### Points / Optodes
 Their radius can be updated, as can their color (with an RGB tuple like `(0,0,1)`).
+
+### Style Options by Object Type
+
+| Type                | Style Updates (arguments to `apply_style`)                |
+|---------------------|----------------------------------------------------------|
+| **Atlas**           | `opacity`, `colors`                                       |
+| **Points**          | `color`, `radius`, `opacity`                              |
+| **Optodes**         | `radius`                                                  |
+| **Volume**          | `opacity`, `color`, `data_range`, `cmap`                  |
+| **Mesh**            | `opacity`                                                 |
+| **StaticMeshData**  | `opacity`, `cmap`                                         |
+| **TimeSeriesMeshData** | (delegates to StaticMeshData and Mesh, so: `opacity`, `cmap`) |
+
+- For `Atlas`, you can update the opacity of all regions and provide a custom color mapping for regions.
+- For `Points`, you can update the color (RGB tuple), radius, and opacity of the points.
+- For `Optodes`, you can update the radius of the optode spheres (color is fixed: sources are red, detectors are blue).
+- For `Volume`, you can update opacity, color, data range, and colormap.
+- For `Mesh`, you can update opacity.
+- For `StaticMeshData`, you can update opacity and colormap.
+- For `TimeSeriesMeshData`, you can update opacity and colormap (applies to the current timepoint's data).
 
