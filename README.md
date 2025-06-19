@@ -1,5 +1,15 @@
 # Lys
 
+## Table of Contents
+
+- [Project Structure](#project-structure)
+- [Documentation](#documentation)
+  - [Visualization](#visualization)
+  - [Working with Time-Series Data](#working-with-time-series-data)
+  - [Style Options by Object Type](#style-options-by-object-type)
+- [Data Directory Setup](#data-directory-setup)
+- [Data Folder Structure](#data-folder-structure)
+
 ## Project Structure
 
 ```
@@ -47,7 +57,7 @@ scene.add(static_data_mesh) .show()
 
 By default we use the full range of the colormap, so if you pass values between [0,0.3] then the cmap is normalised to use the full range of colors. If we so please, we could re-write this as a `normalize=True/False` argument but I think we always (?) want to use the full range of color.
 
-```
+```python
 # Update the colormap to any allowed matplotlib colormap (or custom!)
 scene.style(static_data_mesh, cmap="inferno")
 ```
@@ -81,6 +91,10 @@ StaticDataMesh and TimeSeriesDataMesh styles can be changed with: new opacities,
 - For `Mesh`, you can update opacity.
 - For `StaticMeshData`, you can update opacity and colormap.
 - For `TimeSeriesMeshData`, you can update opacity and colormap (applies to the current timepoint's data).
+
+#### Snapshot Testing for Visualization
+
+To ensure that visualization outputs remain consistent over time, Lys uses **snapshot tests**. These tests render objects (such as meshes, atlases, and optodes), save a reference image (snapshot) on the first run, and compare future renders pixel-by-pixel against this snapshot. If a rendering changes unexpectedly, the test will fail, helping to catch regressions or unintended changes in visualization. You can find these tests in `tests/test_plot3d_snapshot.py` and the reference images in `tests/snapshots/`.
 
 
 ## Data Directory Setup
