@@ -66,14 +66,14 @@ class Mesh:
             actor.GetProperty().SetOpacity(opacity)
 
 
-def from_mat(mat_file_path: str) -> Mesh:
+def from_mat(mat_file_path: str, **kwargs) -> Mesh:
     """ Mesh constructor: Load a Mesh from a MATLAB .mat file """
     mdata = loadmat(mat_file_path)
     vertices = mdata["vertices"].astype(float)  # shape (N,3)
     faces = mdata["faces"] - 1
     min_face_idx = min([min(f) for f in faces])
     assert min_face_idx == 0, f"Expected 1-indexed MATLAB faces, but minimum index after conversion is {min_face_idx}"
-    return Mesh(vertices, faces)
+    return Mesh(vertices, faces, **kwargs)
 
 
 class StaticMeshData:
@@ -153,6 +153,7 @@ class StaticMeshData:
             poly.GetPointData().SetScalars(scalars)
             poly.Modified()
 
+
 class TimeSeriesMeshData:
     """ Mesh with one timeseries per vertex, useful for plotting. """
     def __init__(self, mesh: Mesh, timeseries: np.ndarray, current_timepoint: int = 0):
@@ -196,14 +197,5 @@ class TimeSeriesMeshData:
         # A bit of a hack: apply_style will be called with no new style arguments,
         # so it will just re-apply the current data.
         self._static_view.apply_style(actor)
-
-def _make_scalar_bar(lut: vtk.vtkLookupTable, title: str = "", n_labels: int = 5):
-    """Helper to create scalar bar."""
-    bar = vtk.vtkScalarBarActor()
-    bar.SetLookupTable(lut)
-    bar.SetTitle(title)
-    bar.SetNumberOfLabels(n_labels)
-    bar.UnconstrainedFontSizeOn()
-    return bar
 
 
