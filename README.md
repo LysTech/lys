@@ -19,7 +19,12 @@ lys/
 
 ## Usage Examples
 
-### Basic Mesh Loading and Visualization
+### Visualization
+
+The idea is to respect the Open-Closed principle + have composability. Whenever we define a new object that we want to be able to plot, it just needs to have a `to_vtk` method that returns a vtkActor and the `VTKScene` class can plot it. 
+
+A few examples:
+
 ```python
 from lys.objects.mesh import from_mat, StaticMeshData
 from lys.visualization.plot3d import VTKScene
@@ -54,12 +59,6 @@ scene.style(time_series_mesh, opacity=0.5, cmap="viridis") #change the opacity a
 ```
 
 StaticDataMesh and TimeSeriesDataMesh styles can be changed with: new opacities, new colormaps.
-
-### Atlases
-Atlases work the same, their opacity can be updated. 
-
-### Points / Optodes
-Their radius can be updated, as can their color (with an RGB tuple like `(0,0,1)`).
 
 ### Style Options by Object Type
 
