@@ -62,7 +62,8 @@ By default we use the full range of the colormap, so if you pass values between 
 scene.style(static_data_mesh, cmap="inferno")
 ```
 
-#### Working with Time-Series Data
+**Working with Time-Series Data**
+
 ```python
 scene = VTKScene()
 scene.add(time_series_mesh)
@@ -72,7 +73,7 @@ scene.style(time_series_mesh, opacity=0.5, cmap="viridis") #change the opacity a
 
 StaticDataMesh and TimeSeriesDataMesh styles can be changed with: new opacities, new colormaps.
 
-#### Style Options by Object Type
+**Style Options by Object Type**
 
 | Type                | Style Updates (arguments to `apply_style`)                |
 |---------------------|----------------------------------------------------------|
@@ -92,7 +93,7 @@ StaticDataMesh and TimeSeriesDataMesh styles can be changed with: new opacities,
 - For `StaticMeshData`, you can update opacity and colormap.
 - For `TimeSeriesMeshData`, you can update opacity and colormap (applies to the current timepoint's data).
 
-#### Snapshot Testing for Visualization
+**Snapshot Testing for Visualization**
 
 To ensure that visualization outputs remain consistent over time, Lys uses **snapshot tests**. These tests render objects (such as meshes, atlases, and optodes), save a reference image (snapshot) on the first run, and compare future renders pixel-by-pixel against this snapshot. If a rendering changes unexpectedly, the test will fail, helping to catch regressions or unintended changes in visualization. You can find these tests in `tests/test_plot3d_snapshot.py` and the reference images in `tests/snapshots/`.
 
