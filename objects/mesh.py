@@ -1,3 +1,4 @@
+import os
 import numpy as np
 from scipy.io import loadmat
 import vtk
@@ -5,6 +6,10 @@ from typing import List, Tuple
 
 from lys.visualization.plot3d import VTKScene
 from lys.visualization.utils import _make_scalar_bar, get_vtk_colormap
+from lys.utils.paths import lys_data_dir
+from lys.objects.segmentation import load_charm_segmentation
+from lys.objects.atlas import Atlas
+from lys.utils.coordinates import align_with_csf, undo_the_scaling, undo_affine_transformation, read_adjBBX_file
 
 """
 Defines classes related to meshes:
@@ -14,8 +19,27 @@ Defines classes related to meshes:
 """
 
 #TODO: 
-# - implement the downsample function
+# - implement the downsample function in Mesh
 # - create our own mesh from a segmentation Volume
+
+
+def get_unMNI_mesh(patient: str):
+    """ 
+    patient is a string like "P03"
+
+    I'm not sure if this is good code. Doing the transformation in the constructor is maybe
+    not very good? Annoying to have to load the segmentation.
+    
+    Possible improvements:
+    - decorate this function with a cache decorator (might be too clever / hide problems?)
+    - we save unMNI'd meshes to disk explicity (rather than in a cache) and load them
+    """
+    mni_mesh = _from_mat(_mni_mesh_path(patient))
+    segmentation = load_charm_segmentation(patient, show=False)
+    nativespace_mesh = _mni_to_nativespace(mni_mesh, segmentation, patient)
+    VTKScene().add(segmentation).add(nativespace_mesh).show() # plot for visual check
+    return nativespace_mesh
+
 
 class Mesh:
     def __init__(self, vertices, faces, show = True):
@@ -64,16 +88,6 @@ class Mesh:
         when we add a new style to a mesh we need to change this method, but I doubt this will happen much."""
         if opacity is not None:
             actor.GetProperty().SetOpacity(opacity)
-
-
-def from_mat(mat_file_path: str, **kwargs) -> Mesh:
-    """ Mesh constructor: Load a Mesh from a MATLAB .mat file """
-    mdata = loadmat(mat_file_path)
-    vertices = mdata["vertices"].astype(float)  # shape (N,3)
-    faces = mdata["faces"] - 1
-    min_face_idx = min([min(f) for f in faces])
-    assert min_face_idx == 0, f"Expected 1-indexed MATLAB faces, but minimum index after conversion is {min_face_idx}"
-    return Mesh(vertices, faces, **kwargs)
 
 
 class StaticMeshData:
@@ -198,4 +212,36 @@ class TimeSeriesMeshData:
         # so it will just re-apply the current data.
         self._static_view.apply_style(actor)
 
+
+def _mni_to_nativespace(mesh: Mesh, segmentation: Atlas, patient: str):
+    tissue = 2  # 2 is the white matter, 3 is CSF
+    vol = segmentation.array.flatten()
+    vol[vol != tissue] = 0
+    vol = vol.reshape(segmentation.array.shape)
+    vertices = mesh.vertices
+    faces = mesh.faces
+
+    affine_matrix, x_scales, y_scales, z_scales = read_adjBBX_file(patient)
+
+    vertices = vertices - np.array([128, 128, 128])  # shift AC to origin
+    vertices = undo_the_scaling(vertices, x_scales, y_scales, z_scales)
+    vertices = undo_affine_transformation(vertices, affine_matrix)
+    vertices = vertices + np.array([128, 128, 96])  # AC point starts at O -> move it
+    vertices = align_with_csf(vertices, vol, tissue)
+    return Mesh(vertices, faces, show=False)
+
+
+def _mni_mesh_path(patient: str) -> str:
+    root = lys_data_dir()
+    return os.path.join(root, patient, "anat", "meshes", f"{patient}_EIGMOD_MPR_IIHC_MNI_WM_LH_edited_again_RECOSM_D32k")
+
+
+def _from_mat(mat_file_path: str, **kwargs) -> Mesh:
+    """ Mesh constructor: Load a Mesh from a MATLAB .mat file """
+    mdata = loadmat(mat_file_path)
+    vertices = mdata["vertices"].astype(float)  # shape (N,3)
+    faces = mdata["faces"] - 1
+    min_face_idx = min([min(f) for f in faces])
+    assert min_face_idx == 0, f"Expected 1-indexed MATLAB faces, but minimum index after conversion is {min_face_idx}"
+    return Mesh(vertices, faces, **kwargs)
 
