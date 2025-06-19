@@ -111,6 +111,8 @@ Make sure to restart your terminal or source your shell configuration after maki
 source ~/.bashrc  # or source ~/.zshrc
 ```
 
+This is cool because now we can call `lys.utils.paths.lys_data_dir()` and even if we have different computers it'll work for us all.
+
 ## Data Folder Structure
 
 Your data directory should be organized as follows:
