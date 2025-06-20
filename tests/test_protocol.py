@@ -1,0 +1,86 @@
+import pytest
+from pathlib import Path
+from objects.protocol import Protocol
+import tempfile
+
+
+def test_protocol_from_dict_orders_intervals():
+    protocol_dict = {
+        'A': [(2.0, 3.0), (0.0, 1.0)],
+        'B': [(1.5, 2.5)]
+    }
+    protocol = Protocol.from_dict(protocol_dict)
+    starts = [t[0] for t in protocol.intervals]
+    assert starts == sorted(starts)
+    labels = [t[2] for t in protocol.intervals]
+    assert set(labels) == {'A', 'B'}
+
+
+def test_protocol_from_dict_content():
+    protocol_dict = {
+        'A': [(0.0, 1.0)],
+        'B': [(2.0, 3.0)]
+    }
+    protocol = Protocol.from_dict(protocol_dict)
+    assert protocol.intervals == [
+        (0.0, 1.0, 'A'),
+        (2.0, 3.0, 'B')
+    ]
+
+
+def test_protocol_from_prt_parses_and_orders():
+    prt_content = """
+FileVersion:        2
+
+ResolutionOfTime:   Seconds
+
+Experiment:         NIRS-2011-05-25_002
+
+BackgroundColor:    0 0 0
+TextColor:          255 255 255
+TimeCourseColor:    255 255 30
+TimeCourseThick:    2
+ReferenceFuncColor: 30 200 30
+ReferenceFuncThick: 2
+
+NrOfConditions:  2
+
+MT
+2
+   59.7    64.7
+   10.0    20.0
+Color: 0 255 0
+
+SN
+1
+   15.0    25.0
+Color: 0 255 255
+"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        prt_path = Path(tmpdir) / "test.prt"
+        prt_path.write_text(prt_content)
+        protocol = Protocol.from_prt(prt_path)
+        # Should be ordered by t_start
+        assert protocol.intervals == [
+            (10.0, 20.0, 'MT'),
+            (15.0, 25.0, 'SN'),
+            (59.7, 64.7, 'MT'),
+        ]
+
+
+def test_protocol_from_prt_raises_on_malformed():
+    prt_content = """
+FileVersion:        2
+NrOfConditions:  1
+
+MT
+2
+   59.7    64.7
+   10.0
+Color: 0 255 0
+"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        prt_path = Path(tmpdir) / "bad.prt"
+        prt_path.write_text(prt_content)
+        with pytest.raises(ValueError):
+            Protocol.from_prt(prt_path) 

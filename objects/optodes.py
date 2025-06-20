@@ -2,6 +2,9 @@ from typing import List, Tuple, Union
 import numpy as np
 import vtk
 
+#TODO: implement create_flow2_optodes_from_volume
+
+
 class Points:
     def __init__(self, coordinates: List[Tuple[float, float, float]], 
                  color: Tuple[float, float, float] = (1.0, 0.0, 0.0),

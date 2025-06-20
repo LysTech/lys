@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
-from lys.objects.mesh import get_unMNI_mesh
+from lys.objects.mesh import load_unMNI_mesh
+from lys.objects.segmentation import load_charm_segmentation
 from lys.tests.testing_utils import compare_images, SNAPSHOT_DIR
 from lys.visualization.plot3d import VTKScene
 import os
@@ -16,7 +17,8 @@ def test_mesh_downsample_snapshot(tmp_path):
     - Optionally checks faces are correctly reindexed
     - Compares rendered image to snapshot
     """
-    mesh = get_unMNI_mesh("P03")
+    segmentation = load_charm_segmentation("P03", show=False)
+    mesh = load_unMNI_mesh("P03", segmentation)
     n_vertices_orig = mesh.vertices.shape[0]
     assert n_vertices_orig > 10000, f"Expected >10k vertices, got {n_vertices_orig}"
 

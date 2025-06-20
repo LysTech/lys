@@ -24,9 +24,10 @@ Defines classes related to meshes:
 # - create our own mesh from a segmentation Volume
 
 
-def get_unMNI_mesh(patient: str):
+def load_unMNI_mesh(patient: str, segmentation: Atlas):
     """ 
     patient: e.g. "P03"
+    segmentation: Atlas object, required for alignment to native space
 
     I'm not sure if this is good code. Doing the transformation in the constructor is maybe
     not very good? Annoying to have to load the segmentation.
@@ -36,7 +37,6 @@ def get_unMNI_mesh(patient: str):
     - we save unMNI'd meshes to disk explicity (rather than in a cache) and load them
     """
     mni_mesh = from_mat(mni_mesh_path(patient))
-    segmentation = load_charm_segmentation(patient, show=False)
     nativespace_mesh = mni_to_nativespace(mni_mesh, segmentation, patient)
     VTKScene().add(segmentation).add(nativespace_mesh).show() # plot for visual check
     return nativespace_mesh
