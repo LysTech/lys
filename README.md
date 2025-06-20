@@ -113,6 +113,38 @@ source ~/.bashrc  # or source ~/.zshrc
 
 This is cool because now we can call `lys.utils.paths.lys_data_dir()` and even if we have different computers it'll work for us all.
 
+### Patient Class
+
+The `Patient` class represents a subject with their associated brain segmentation and surface mesh. It is designed as an immutable (frozen) dataclass to ensure that once a `Patient` object is created, its attributes cannot be changed. This immutability helps prevent accidental modification of patient data, making the codebase safer and easier to reason about, especially when passing patient objects between functions or threads.
+
+**How to Instantiate a Patient**
+
+To create a `Patient` object, use the `from_name` class method, which automatically loads the relevant segmentation and mesh data for the given patient identifier:
+
+```python
+from lys.objects.patient import Patient
+
+# Instantiate a patient by their identifier (e.g., "P03")
+patient = Patient.from_name("P03")
+
+# Access patient attributes
+print(patient.name)           # 'P03'
+print(patient.segmentation)   # Atlas object
+print(patient.mesh)           # Mesh object
+```
+
+- `name`: The patient identifier string (e.g., "P03").
+- `segmentation`: An `Atlas` object representing the patient's brain segmentation.
+- `mesh`: A `Mesh` object representing the patient's brain surface mesh in native space.
+
+**Why Immutability?**
+
+The `Patient` class is defined as a frozen dataclass (`@dataclass(frozen=True)`), which means its attributes cannot be modified after creation. This design choice:
+- Prevents accidental changes to patient data after loading.
+- Makes `Patient` objects hashable and safe to use as dictionary keys or in sets.
+- Encourages a functional programming style, improving code reliability and maintainability.
+
+
 ## Data Folder Structure
 
 Your data directory should be organized as follows:
