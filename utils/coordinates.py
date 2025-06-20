@@ -88,6 +88,7 @@ def undo_affine_transformation(vertices, affine_matrix):
 
 
 def read_adjBBX_file(patient: str):
+    #TODO: make this take in a _adjBBX file and parse it, I currently don't have a copy of such a file
     print("***WARNING: NOT YET GENERAL, ONLY FOR P03***")
     affine_matrix = np.array([                                                      
                     [0.8542155027389526, -0.3071072399616241, -0.0305903572589159, -6.6516065597534180],
