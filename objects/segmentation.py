@@ -21,3 +21,4 @@ def load_charm_segmentation(patient: str, show: bool = True) -> Atlas:
 def _segmentation_path(patient: str) -> str:
     root = lys_data_dir()
     return os.path.join(root, patient, "anat", "volumes", f"{patient}_7tissues.jnii")
+

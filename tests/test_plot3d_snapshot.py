@@ -10,45 +10,12 @@ from lys.utils.paths import lys_data_dir
 from lys.objects.segmentation import load_charm_segmentation
 from lys.objects.optodes import Points
 from lys.objects.mesh import TimeSeriesMeshData
+from lys.tests.testing_utils import SNAPSHOT_DIR, FAILED_SNAPSHOT_DIR, compare_images
 
 """
 Snapshot tests: plot an object, take screenshot on first test run, then compare to saved image pixel by pixel in future tests.
 """
 
-SNAPSHOT_DIR = os.path.join(os.path.dirname(__file__), "snapshots")
-FAILED_SNAPSHOT_DIR = os.path.join(SNAPSHOT_DIR, "failed")
-
-def compare_images(img1_path, img2_path, tolerance=5):
-    """Compare two images pixel-by-pixel. Returns True if they are the same within tolerance.
-        Tolerance of 5 is conservative, max diff would be 255"""
-    img1 = Image.open(img1_path).convert("RGB")
-    img2 = Image.open(img2_path).convert("RGB")
-    diff = ImageChops.difference(img1, img2)
-    np_diff = np.array(diff)
-    max_diff = np.max(np_diff)
-    return max_diff <= tolerance
-
-
-def test_mesh_snapshot(tmp_path):
-    """Test that rendering a mesh produces the expected image."""
-    # Arrange
-    mesh_path = os.path.join(lys_data_dir(), "P03/anat/meshes/P03_EIGMOD_MPR_IIHC_MNI_WM_LH_edited_again_RECOSM_D32k.mat")
-    mesh = from_mat(mesh_path, show=False)
-    scene = VTKScene()
-    scene.add(mesh)
-    out_path = tmp_path / "mesh.png"
-    snapshot_path = os.path.join(SNAPSHOT_DIR, "mesh.png")
-
-    # Act
-    scene.screenshot(str(out_path), size=(400, 400))
-
-    # Assert
-    if not os.path.exists(snapshot_path):
-        # First run: save the snapshot
-        os.rename(out_path, snapshot_path)
-        pytest.skip("Snapshot created, rerun the test to compare.")
-    else:
-        assert compare_images(out_path, snapshot_path), "Rendered image does not match snapshot."
 
 
 def test_atlas_snapshot(tmp_path):
@@ -124,15 +91,3 @@ def test_atlas_dynamic_legend(tmp_path):
     scene.screenshot(str(out_path_restored), size=(600, 600))
     # Should match the original snapshot
     assert compare_images(out_path_restored, snapshot_path), "Atlas after re-showing label does not match original snapshot."
-
-
-@pytest.fixture(scope="session", autouse=True)
-def clean_failed_snapshots():
-    """Empty the 'snapshots/failed' directory before any tests run."""
-    if os.path.exists(FAILED_SNAPSHOT_DIR):
-        for filename in os.listdir(FAILED_SNAPSHOT_DIR):
-            file_path = os.path.join(FAILED_SNAPSHOT_DIR, filename)
-            if os.path.isfile(file_path):
-                os.remove(file_path)
-    else:
-        os.makedirs(FAILED_SNAPSHOT_DIR, exist_ok=True)

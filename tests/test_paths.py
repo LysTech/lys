@@ -11,5 +11,6 @@ def test_check_file_exists():
     with pytest.raises(FileNotFoundError, match="File not found: /this/is/dummy/path"):
         check_file_exists("/this/is/dummy/path")
 
+
 def test_lys_data_dir():
     lys_data_dir()

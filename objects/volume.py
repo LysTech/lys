@@ -1,6 +1,7 @@
 import vtk
 import json
 import numpy as np
+import pprint
 
 from lys.visualization.plot3d import VTKScene
 
@@ -92,6 +93,9 @@ class Volume:
 def from_jnii(file_path: str, **kwargs) -> Volume:
     with open(file_path, "r") as f:
         raw = json.load(f)
+    
+    print("NIFTI Header:")
+    pprint.pprint(raw['struct']['NIFTIHeader'])
 
     volumeData = np.array(raw["struct"]["NIFTIData"]["_ArrayData_"], dtype=float)
     volumeData = volumeData.reshape(raw["struct"]["NIFTIHeader"]["Dim"])

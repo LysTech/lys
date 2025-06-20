@@ -2,6 +2,7 @@ import os
 import numpy as np
 from scipy.io import loadmat
 import vtk
+from vtk.util import numpy_support
 from typing import List, Tuple
 
 from lys.visualization.plot3d import VTKScene
@@ -25,7 +26,7 @@ Defines classes related to meshes:
 
 def get_unMNI_mesh(patient: str):
     """ 
-    patient is a string like "P03"
+    patient: e.g. "P03"
 
     I'm not sure if this is good code. Doing the transformation in the constructor is maybe
     not very good? Annoying to have to load the segmentation.
@@ -34,9 +35,9 @@ def get_unMNI_mesh(patient: str):
     - decorate this function with a cache decorator (might be too clever / hide problems?)
     - we save unMNI'd meshes to disk explicity (rather than in a cache) and load them
     """
-    mni_mesh = _from_mat(_mni_mesh_path(patient))
+    mni_mesh = from_mat(mni_mesh_path(patient))
     segmentation = load_charm_segmentation(patient, show=False)
-    nativespace_mesh = _mni_to_nativespace(mni_mesh, segmentation, patient)
+    nativespace_mesh = mni_to_nativespace(mni_mesh, segmentation, patient)
     VTKScene().add(segmentation).add(nativespace_mesh).show() # plot for visual check
     return nativespace_mesh
 
@@ -51,14 +52,59 @@ class Mesh:
             _scene.add(self).show()
         self._check_mesh()
 
-    def downsample(self, n_vertices: int) -> 'Mesh':
-        """ Return a new mesh with only a subset of the vertices """
-        raise NotImplementedError
+    def downsample(self, target_vertices: int) -> 'Mesh':
+        """
+        Return a new Mesh with a subset of vertices and corresponding faces.
+        This method downsamples the mesh to approximately `target_vertices`.
+        Args:
+            target_vertices (int): The target number of vertices for the downsampled mesh.
+        Returns:
+            Mesh: The downsampled mesh.
+        """
+        if target_vertices >= len(self.vertices):
+            return Mesh(self.vertices.copy(), self.faces.copy(), show=False)
+
+        decimate = vtk.vtkQuadricDecimation()
+        
+        # Convert our mesh to a VTK PolyData object
+        poly_data = vtk.vtkPolyData()
+        points = vtk.vtkPoints()
+        points.SetData(numpy_support.numpy_to_vtk(self.vertices))
+        poly_data.SetPoints(points)
+
+        cells = vtk.vtkCellArray()
+        # VTK requires a flat array of (n_points, p1, p2, ..., pn, n_points, p1, ...)
+        faces_flat = np.hstack((np.full((self.faces.shape[0], 1), 3), self.faces)).flatten()
+        cells.SetCells(poly_data.GetNumberOfPoints(), numpy_support.numpy_to_vtkIdTypeArray(faces_flat))
+        poly_data.SetPolys(cells)
+        
+        decimate.SetInputData(poly_data)
+        
+        # Calculate the decimation factor
+        current_vertices = self.vertices.shape[0]
+        reduction = (current_vertices - target_vertices) / current_vertices
+        decimate.SetTargetReduction(reduction)
+        
+        decimate.Update()
+        
+        decimated_poly = decimate.GetOutput()
+        
+        # Extract vertices and faces from the decimated polydata
+        new_vertices = numpy_support.vtk_to_numpy(decimated_poly.GetPoints().GetData())
+        
+        new_faces_vtk = decimated_poly.GetPolys().GetData()
+        new_faces_numpy = numpy_support.vtk_to_numpy(new_faces_vtk)
+        
+        # Reshape the flat array from VTK back into a faces array
+        new_faces = new_faces_numpy.reshape(-1, 4)[:, 1:]
+
+        return Mesh(new_vertices, new_faces, show=False)
 
     def _check_mesh(self):
         """ Check mesh properties:
             - 0-indexing
         """
+        assert len(self.faces) != 0, "Mesh has no faces"
         min_face_idx = min([min(f) for f in self.faces])
         assert min_face_idx == 0, f"Expected 0-indexed faces, got {min_face_idx}"
 
@@ -71,8 +117,12 @@ class Mesh:
         poly.SetPoints(pts)
 
         polys = vtk.vtkCellArray()
-        for face in self.faces:
-            polys.InsertNextCell(len(face), face)
+        # The faces must be converted to a VTK-compatible format
+        if self.faces.size > 0:
+            # VTK requires a flat array of (n_points, p1, p2, ..., pn, n_points, p1, ...)
+            faces_flat = np.hstack((np.full((self.faces.shape[0], 1), 3), self.faces)).flatten()
+            id_type_array = numpy_support.numpy_to_vtkIdTypeArray(faces_flat)
+            polys.SetCells(self.vertices.shape[0], id_type_array)
         poly.SetPolys(polys)
 
         mapper = vtk.vtkPolyDataMapper()
@@ -213,7 +263,7 @@ class TimeSeriesMeshData:
         self._static_view.apply_style(actor)
 
 
-def _mni_to_nativespace(mesh: Mesh, segmentation: Atlas, patient: str):
+def mni_to_nativespace(mesh: Mesh, segmentation: Atlas, patient: str):
     tissue = 2  # 2 is the white matter, 3 is CSF
     vol = segmentation.array.flatten()
     vol[vol != tissue] = 0
@@ -231,12 +281,12 @@ def _mni_to_nativespace(mesh: Mesh, segmentation: Atlas, patient: str):
     return Mesh(vertices, faces, show=False)
 
 
-def _mni_mesh_path(patient: str) -> str:
+def mni_mesh_path(patient: str) -> str:
     root = lys_data_dir()
     return os.path.join(root, patient, "anat", "meshes", f"{patient}_EIGMOD_MPR_IIHC_MNI_WM_LH_edited_again_RECOSM_D32k")
 
 
-def _from_mat(mat_file_path: str, **kwargs) -> Mesh:
+def from_mat(mat_file_path: str, **kwargs) -> Mesh:
     """ Mesh constructor: Load a Mesh from a MATLAB .mat file """
     mdata = loadmat(mat_file_path)
     vertices = mdata["vertices"].astype(float)  # shape (N,3)
