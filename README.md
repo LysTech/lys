@@ -15,11 +15,18 @@
 ```
 lys/
 ├── objects/
-│   ├── atlas.py   
-│   ├── mesh.py       
-│   ├── volume.py     
+│   ├── atlas.py
+│   ├── jacobian.py
+│   ├── mesh.py
+│   ├── optodes.py
+│   ├── patient.py
+│   ├── protocol.py
+│   ├── segmentation.py
+│   ├── session.py
+│   ├── volume.py
 │   └── __init__.py
 ├── utils/
+│   ├── coordinates.py
 │   ├── paths.py   
 │   └── strings.py
 ├── visualization/

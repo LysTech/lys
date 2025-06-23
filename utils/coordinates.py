@@ -1,5 +1,12 @@
 import numpy as np
 
+
+"""
+We have some notes on coordinate systems here:
+
+https://www.notion.so/Lys-Technologies-5d72f2c92d98453a9b5cd2f866164f6b?p=19e1eff4030180edab3ccdc7c9717e74&pm=s
+"""
+
 def align_with_csf(vertices, vol, tissue):
     """
     Align mesh vertices with CSF points in the segmentation volume.
