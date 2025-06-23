@@ -4,7 +4,9 @@
 
 - [Project Structure](#project-structure)
 - [Documentation](#documentation)
-  - [Visualization](#visualization)
+- [Visualization](#visualization)
+- [Patient Class](#patient-class)
+- [Jacobian](#jacobian)
 - [Data Directory Setup](#data-directory-setup)
 - [Data Folder Structure](#data-folder-structure)
 
@@ -122,7 +124,7 @@ The `Patient` class represents a subject with their associated brain segmentatio
 To create a `Patient` object, use the `from_name` class method, which automatically loads the relevant segmentation and mesh data for the given patient identifier:
 
 ```python
-from lys.objects.patient import Patient
+from lys.objects import Patient
 
 # Instantiate a patient by their identifier (e.g., "P03")
 patient = Patient.from_name("P03")
@@ -143,6 +145,42 @@ The `Patient` class is defined as a frozen dataclass (`@dataclass(frozen=True)`)
 - Prevents accidental changes to patient data after loading.
 - Makes `Patient` objects hashable and safe to use as dictionary keys or in sets.
 - Encourages a functional programming style, improving code reliability and maintainability.
+
+### Jacobian
+
+The `Jacobian` class and its associated functions provide a way to load, represent, and work with Jacobian matrices, which are typically used in neuroimaging and optical modeling to describe how measurements relate to changes in tissue properties at different locations in the brain.
+
+**Key Features:**
+
+  - The class provides a method `sample_at_vertices(vertices)` to interpolate values from the Jacobian at arbitrary 3D coordinates using linear interpolation.
+
+- **Loading Jacobians:**
+  - Use `load_jacobians(patient, experiment, session)` to automatically find and load all Jacobian files for a given subject and session. This returns a list of `Jacobian` objects.
+  - Use `load_jacobian_from(path)` to load a Jacobian from a specific file path. Currently, only MATLAB `.mat` files are supported (with more formats planned).
+  - The function `load_jacobian_from_mat(path)` loads a Jacobian from a MATLAB `.mat` file, handling the necessary transposition to convert MATLAB's storage order to the expected Python/NumPy order. A warning is issued to remind users of this transformation.
+
+- **File Discovery:**
+  - The helper function `_jacobian_paths(patient, experiment, session)` constructs the expected file paths for Jacobian files based on the data directory structure and returns all matching files in the session directory.
+  - Jacobian files are expected to have 'jacobian' in their filename and be located in the appropriate session directory under the data root.
+
+- **Example Usage:**
+
+```python
+from lys.objects.jacobian import load_jacobians
+
+# Load all Jacobians for a given patient/session
+jacobians = load_jacobians('P03', 'fnirs_8classes', 'session-01')
+
+# Interpolate values at specific 3D coordinates
+vertices = np.array([[10, 20, 30], [40, 50, 60]])
+sampled = jacobians[0].sample_at_vertices(vertices)
+print(sampled)
+```
+
+- **Notes:**
+  - Only `.mat` files are currently supported for Jacobian loading. Attempting to load other formats will raise an error.
+  - The code is designed to be extensible for future file types.
+  - If no Jacobian file is found for a session, a `FileNotFoundError` is raised with a helpful message.
 
 
 ## Data Folder Structure
