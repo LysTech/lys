@@ -4,10 +4,14 @@ from pathlib import Path
 import os
 from lys.utils.paths import lys_data_dir, check_file_exists
 
+#TODO: check how slow it would be to just read the file every time, if too slow: think about caching but... seems unlikely?
+
 @dataclass(frozen=True)
 class Protocol:
     """
     Represents a neuro experiment protocol as an ordered list of (t_start, t_end, label) tuples.
+
+    Respects OCP: we can add a from_whatever constructor for our future formats.
     """
     intervals: List[Tuple[float, float, str]] = field(default_factory=list)
 
@@ -82,6 +86,7 @@ class Protocol:
 
         return protocol
 
+
 def create_protocol(patient: str, experiment: str, session: str) -> Protocol:
     """
     Loads a Protocol object for a given patient, experiment, and session.
@@ -91,9 +96,11 @@ def create_protocol(patient: str, experiment: str, session: str) -> Protocol:
     check_file_exists(path)
     return Protocol.from_prt(Path(path))
 
+
 def _protocol_path(patient: str, experiment: str, session: str) -> str:
     """
     Constructs the path to the protocol.prt file for a given patient, experiment, and session.
     """
     root = lys_data_dir()
     return os.path.join(root, patient, 'nirs', experiment, session, 'protocol.prt')
+
