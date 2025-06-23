@@ -4,13 +4,13 @@ from unittest.mock import patch
 import os
 import h5py
 
-from lys.objects.jacobian import Jacobian, _jacobian_path, load_jacobian_from_mat
+from lys.objects.jacobian import Jacobian, _jacobian_paths, load_jacobian_from
 
 
 def test_jacobian_initialization():
     """Tests that the Jacobian can be initialized correctly."""
     data = np.random.rand(10, 10, 10)
-    j = Jacobian(data)
+    j = Jacobian(data, wavelength='wl1')
     np.testing.assert_array_equal(j.data, data)
 
 
@@ -19,7 +19,7 @@ def test_sample_at_vertices():
     # Create a simple 3x3x3 jacobian where the value is the sum of indices
     x, y, z = np.mgrid[0:3, 0:3, 0:3]
     data = x + y + z
-    j = Jacobian(data)
+    j = Jacobian(data, wavelength='wl1')
 
     # Test sampling at integer coordinates (on grid points)
     vertices_on_grid = np.array([[0, 0, 0], [1, 1, 1], [2, 2, 2]])
@@ -41,11 +41,12 @@ def test_sample_at_vertices():
 
 
 def test_jacobian_path_finds_jacobian_file():
-    path = _jacobian_path('P03', 'fnirs_8classes', 'session-01')
-    assert "Jacobian" in path.split("/")[-1]
+    paths = _jacobian_paths('P03', 'fnirs_8classes', 'session-01')
+    for path in paths:
+        assert "Jacobian" in path.split("/")[-1]
 
     with pytest.raises(FileNotFoundError):
-        path = _jacobian_path('P03', 'Not-An-Experiment', 'session-01')
+        paths = _jacobian_paths('P03', 'Not-An-Experiment', 'session-01')
 
 
 def test_load_jacobian_from_mat(tmp_path):
@@ -54,13 +55,31 @@ def test_load_jacobian_from_mat(tmp_path):
     arr = np.arange(2*3*4*5*6).reshape(2, 3, 4, 5, 6)
     # Save as 'Jacobian' in a .mat file with shape (6, 5, 4, 3, 2) to simulate MATLAB order
     arr_matlab = np.transpose(arr, (4, 3, 2, 1, 0))
-    mat_path = tmp_path / "test_jacobian.mat"
+    mat_path = tmp_path / "test_jacobian_wl2.mat"
     with h5py.File(mat_path, "w") as f:
         f.create_dataset("Jacobian", data=arr_matlab)
     # Load using our function
-    jac = load_jacobian_from_mat(str(mat_path))
+    jac = load_jacobian_from(str(mat_path))
     # The loaded data should match the original arr
     np.testing.assert_array_equal(jac.data, arr)
+
+
+def test_jacobian_wavelength_extraction(tmp_path):
+    """Test that the Jacobian object sets the wavelength attribute based on the file path."""
+    import h5py
+    from lys.objects.jacobian import load_jacobian_from
+    arr = np.zeros((2, 2, 2, 2, 2))
+    arr_matlab = np.transpose(arr, (4, 3, 2, 1, 0))
+    mat_path_wl1 = tmp_path / "test_jacobian_wl1.mat"
+    with h5py.File(mat_path_wl1, "w") as f:
+        f.create_dataset("Jacobian", data=arr_matlab)
+    jac1 = load_jacobian_from(str(mat_path_wl1))
+    assert jac1.wavelength == "wl1"
+    mat_path_wl2 = tmp_path / "test_jacobian_wl2.mat"
+    with h5py.File(mat_path_wl2, "w") as f:
+        f.create_dataset("Jacobian", data=arr_matlab)
+    jac2 = load_jacobian_from(str(mat_path_wl2))
+    assert jac2.wavelength == "wl2"
 
 
 

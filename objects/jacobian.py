@@ -1,19 +1,21 @@
+import warnings
 from dataclasses import dataclass
 import numpy as np
 from scipy.interpolate import interpn
 import h5py
-import warnings
 
 from lys.utils import lys_data_dir
 import os
 
 #TODO: implement lazy loading of the jacobian
+#TODO: reflect on the multi-wavelength thing
 
 @dataclass
 class Jacobian:
-    """Represents a Jacobian matrix, which is a 3D numpy array."""
+    """Represents a Jacobian matrix, which is a 3D numpy array and its associated wavelength."""
 
     data: np.ndarray
+    wavelength: str  # e.g. 'wl1' or 'wl2'
 
     
     def sample_at_vertices(self, vertices: np.ndarray) -> np.ndarray:
@@ -40,9 +42,65 @@ class Jacobian:
         )
 
 
+class JacobianFactory:
+    """
+    tl;dr: we don't wanna load the same Jacobian file N-times if it's shared across sessions!
+
+    GPT's docstring: 
+
+    A factory for creating and caching Jacobian objects.
+
+    This factory ensures that a Jacobian from a specific file is loaded only
+    once. It uses the canonical path of the file as a cache key, so it
+    correctly handles different paths (e.g., via symbolic links) that point to
+    the same underlying file.
+    """
+    def __init__(self):
+        self._cache = {}
+
+    def get(self, path: str) -> Jacobian:
+        """Gets a Jacobian, using a cache to avoid redundant loads."""
+        real_path = os.path.realpath(path)
+        if real_path in self._cache:
+            print(f"Using cached Jacobian from {real_path}")
+            return self._cache[real_path]
+
+        print(f"Loading Jacobian from {path}")
+        jacobian = self._load_from_file(path)
+        self._cache[real_path] = jacobian
+        return jacobian
+
+    def _load_from_file(self, path: str) -> Jacobian:
+        """Loads a Jacobian from a file, dispatching on extension."""
+        wavelength = _extract_wavelength_from_path(path)
+        if path.endswith(".mat"):
+            return self._load_from_mat(path, wavelength)
+        else:
+            raise ValueError(f"Unsupported file extension: {path}")
+
+    def _load_from_mat(self, path: str, wavelength: str) -> Jacobian:
+        """Loads a Jacobian from a MATLAB .mat file."""
+        with h5py.File(path, "r") as f_jac:
+            J_dataset = f_jac["Jacobian"]
+            J_full = J_dataset[()]
+            # Transpose to (192, 256, 256, 16, 24) if original is (24, 16, 256, 256, 192)
+            J = np.transpose(J_full, (4, 3, 2, 1, 0))
+            warnings.warn(
+                "Transposing the raw Jacobian file from MATLAB order to (N,M, 256,256,192). NOT SURE!! "
+            )
+
+            return Jacobian(J, wavelength)
+
+
+_jacobian_factory = JacobianFactory()
+
+
 def load_jacobians(patient: str, experiment: str, session: str) -> list[Jacobian]:
     """
     Loads all Jacobian files for a given patient, experiment, and session.
+
+    This function uses a factory that caches Jacobians, so if multiple sessions
+    use symlinks to the same Jacobian file, the file will only be loaded once.
 
     Args:
         patient: The patient identifier (e.g., 'P03').
@@ -53,42 +111,34 @@ def load_jacobians(patient: str, experiment: str, session: str) -> list[Jacobian
         A list of Jacobian objects loaded from the corresponding files.
     """
     paths = _jacobian_paths(patient, experiment, session)
-    out = []
-    for path in paths:
-        print(f"Loading Jacobian from {path}")
-        jac = load_jacobian_from(path)
-        out.append(jac)
-    return out
+    return [_jacobian_factory.get(path) for path in paths]
 
 
 def load_jacobian_from(path: str) -> Jacobian:
-    """ Violates OCP but we'll add other file types later, realistically it's only one or two more types"""
-    if path.endswith(".mat"):
-        return load_jacobian_from_mat(path)
-    else:
-        raise ValueError(f"Unsupported file extension: {path}")
+    """Loads a Jacobian from a file, using a cache to avoid redundant loads."""
+    return _jacobian_factory.get(path)
 
 
-def load_jacobian_from_mat(path: str) -> Jacobian:
+def _extract_wavelength_from_path(path: str) -> str:
     """
-    Loads a Jacobian from a MATLAB .mat file produced by, e.g., adjoint.m.
+    Extracts the wavelength identifier ('wl1' or 'wl2') from the file path.
 
     Args:
-        path: Path to the .mat file containing the Jacobian.
+        path: The file path to extract the wavelength from.
 
     Returns:
-        Jacobian: An instance of the Jacobian class with the loaded data.
-    """
-    with h5py.File(path, "r") as f_jac:
-        J_dataset = f_jac["Jacobian"]
-        J_full = J_dataset[()]
-        # Transpose to (192, 256, 256, 16, 24) if original is (24, 16, 256, 256, 192)
-        J = np.transpose(J_full, (4, 3, 2, 1, 0))
-        warnings.warn(
-            "Transposing the raw Jacobian file from MATLAB order to (N,M, 256,256,192). NOT SURE!! "
-        )
+        The wavelength string ('wl1' or 'wl2').
 
-        return Jacobian(J)
+    Raises:
+        ValueError: If neither 'wl1' nor 'wl2' is found in the path.
+    """
+    basename = os.path.basename(path).lower()
+    if 'wl1' in basename:
+        return 'wl1'
+    elif 'wl2' in basename:
+        return 'wl2'
+    else:
+        raise ValueError(f"Could not determine wavelength from path: {path}")
 
 
 def _jacobian_paths(patient: str, experiment: str, session: str) -> list[str]:

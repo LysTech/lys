@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from typing import List, Tuple, Any, Dict, ClassVar
 from pathlib import Path
+import os
+from lys.utils.paths import lys_data_dir, check_file_exists
 
 @dataclass(frozen=True)
 class Protocol:
@@ -79,3 +81,19 @@ class Protocol:
                 i += 1
 
         return protocol
+
+def create_protocol(patient: str, experiment: str, session: str) -> Protocol:
+    """
+    Loads a Protocol object for a given patient, experiment, and session.
+    Finds the protocol.prt file, checks it exists, and loads it.
+    """
+    path = _protocol_path(patient, experiment, session)
+    check_file_exists(path)
+    return Protocol.from_prt(Path(path))
+
+def _protocol_path(patient: str, experiment: str, session: str) -> str:
+    """
+    Constructs the path to the protocol.prt file for a given patient, experiment, and session.
+    """
+    root = lys_data_dir()
+    return os.path.join(root, patient, 'nirs', experiment, session, 'protocol.prt')
