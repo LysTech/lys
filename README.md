@@ -147,6 +147,19 @@ The `Patient` class is defined as a frozen dataclass (`@dataclass(frozen=True)`)
 - Encourages a functional programming style, improving code reliability and maintainability.
 
 ### Jacobian
+- **Example Usage:**
+
+```python
+from lys.objects.jacobian import load_jacobians
+
+# Load all Jacobians for a given patient/session
+jacobians = load_jacobians('P03', 'fnirs_8classes', 'session-01')
+
+# Interpolate values at specific 3D coordinates
+vertices = np.array([[10, 20, 30], [40, 50, 60]])
+sampled = jacobians[0].sample_at_vertices(vertices)
+print(sampled)
+```
 
 The `Jacobian` class and its associated functions provide a way to load, represent, and work with Jacobian matrices, which are typically used in neuroimaging and optical modeling to describe how measurements relate to changes in tissue properties at different locations in the brain.
 
@@ -163,19 +176,6 @@ The `Jacobian` class and its associated functions provide a way to load, represe
   - The helper function `_jacobian_paths(patient, experiment, session)` constructs the expected file paths for Jacobian files based on the data directory structure and returns all matching files in the session directory.
   - Jacobian files are expected to have 'jacobian' in their filename and be located in the appropriate session directory under the data root.
 
-- **Example Usage:**
-
-```python
-from lys.objects.jacobian import load_jacobians
-
-# Load all Jacobians for a given patient/session
-jacobians = load_jacobians('P03', 'fnirs_8classes', 'session-01')
-
-# Interpolate values at specific 3D coordinates
-vertices = np.array([[10, 20, 30], [40, 50, 60]])
-sampled = jacobians[0].sample_at_vertices(vertices)
-print(sampled)
-```
 
 - **Notes:**
   - Only `.mat` files are currently supported for Jacobian loading. Attempting to load other formats will raise an error.
