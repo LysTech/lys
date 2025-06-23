@@ -161,8 +161,6 @@ sampled = jacobians[0].sample_at_vertices(vertices)
 print(sampled)
 ```
 
-The `Jacobian` class and its associated functions provide a way to load, represent, and work with Jacobian matrices, which are typically used in neuroimaging and optical modeling to describe how measurements relate to changes in tissue properties at different locations in the brain.
-
 **Key Features:**
 
   - The class provides a method `sample_at_vertices(vertices)` to interpolate values from the Jacobian at arbitrary 3D coordinates using linear interpolation.
@@ -172,15 +170,9 @@ The `Jacobian` class and its associated functions provide a way to load, represe
   - Use `load_jacobian_from(path)` to load a Jacobian from a specific file path. Currently, only MATLAB `.mat` files are supported (with more formats planned).
   - The function `load_jacobian_from_mat(path)` loads a Jacobian from a MATLAB `.mat` file, handling the necessary transposition to convert MATLAB's storage order to the expected Python/NumPy order. A warning is issued to remind users of this transformation.
 
-- **File Discovery:**
-  - The helper function `_jacobian_paths(patient, experiment, session)` constructs the expected file paths for Jacobian files based on the data directory structure and returns all matching files in the session directory.
-  - Jacobian files are expected to have 'jacobian' in their filename and be located in the appropriate session directory under the data root.
-
-
 - **Notes:**
   - Only `.mat` files are currently supported for Jacobian loading. Attempting to load other formats will raise an error.
   - The code is designed to be extensible for future file types.
-  - If no Jacobian file is found for a session, a `FileNotFoundError` is raised with a helpful message.
 
 
 ## Data Folder Structure
