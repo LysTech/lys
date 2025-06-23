@@ -34,6 +34,8 @@ def test_protocol_from_prt_parses_and_orders():
 FileVersion:        2
 
 ResolutionOfTime:   Seconds
+    # iterate over subjects in folder structure
+        # call create_session(subject_name, experiment_name)
 
 Experiment:         NIRS-2011-05-25_002
 
@@ -88,18 +90,22 @@ Color: 0 255 0
             Protocol.from_prt(prt_path)
 
 
-def test_create_protocol_simple():
+def test_create_protocol_simple(tmp_path, monkeypatch):
     """A minimal test for create_protocol: loads a protocol with one interval and label."""
-    from objects.protocol import create_protocol
-    with tempfile.TemporaryDirectory() as tmpdir:
-        # Setup directory structure
-        patient = "P01"
-        experiment = "exp"
-        session = "sess"
-        session_dir = os.path.join(tmpdir, patient, "nirs", experiment, session)
-        os.makedirs(session_dir)
-        prt_path = os.path.join(session_dir, "protocol.prt")
-        prt_content = """
+    import importlib
+    # Patch lys_data_dir to return tmp_path as a Path object for this test only
+    monkeypatch.setattr("lys.utils.paths.lys_data_dir", lambda: Path(tmp_path))
+    import lys.objects.protocol as prot
+    importlib.reload(prot)  # Force reload so it picks up the patched lys_data_dir
+
+    # Setup directory structure
+    patient = "P01"
+    experiment = "exp"
+    session = "sess"
+    session_dir = tmp_path / patient / "nirs" / experiment / session
+    session_dir.mkdir(parents=True)
+    prt_path = session_dir / "protocol.prt"
+    prt_content = """
 FileVersion: 2
 NrOfConditions: 1
 REST
@@ -107,15 +113,6 @@ REST
   0.0  10.0
 Color: 0 0 0
 """
-        with open(prt_path, "w") as f:
-            f.write(prt_content)
-        # Patch lys_data_dir to return tmpdir
-        import lys.utils.paths
-        old_lys_data_dir = lys.utils.paths.lys_data_dir
-        lys.utils.paths.lys_data_dir = lambda: tmpdir
-        try:
-            from lys.objects.protocol import create_protocol #import here for patching lys_data_dir
-            protocol = create_protocol(patient, experiment, session)
-            assert protocol.intervals == [(0.0, 10.0, "REST")]
-        finally:
-            lys.utils.paths.lys_data_dir = old_lys_data_dir 
+    prt_path.write_text(prt_content)
+    protocol = prot.create_protocol(patient, experiment, session)
+    assert protocol.intervals == [(0.0, 10.0, "REST")]

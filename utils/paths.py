@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 def lys_data_dir():
     try:
@@ -7,7 +8,7 @@ def lys_data_dir():
         msg = """ Please make sure LYS_DATA_DIR is in your system environment:
             add: 'export LYS_DATA_DIR=/path/ to your bashrc and source it.'"""
         raise RuntimeError(msg)
-    return dirs
+    return Path(dirs)
 
 
 def check_file_exists(path: str) -> None:

@@ -18,7 +18,7 @@ def make_dummy_session(subject_id):
 
 def test_filter_by_subjects():
     sessions = [make_dummy_session(sid) for sid in ["P01", "P02", "P03"]]
-    exp = Experiment("TestExp", sessions)
+    exp = Experiment("experiment_name", "scanner_name", sessions)
     filtered = exp.filter_by_subjects(["P02"])
     assert len(filtered.sessions) == 1
     assert filtered.sessions[0].patient.name == "P02" 
