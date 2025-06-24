@@ -86,6 +86,19 @@ class Protocol:
 
         return protocol
 
+    @classmethod
+    def from_session_path(cls, session_path: Path) -> 'Protocol':
+        """
+        Search for a .prt file in the given session_path directory and construct a Protocol from it.
+        Raises FileNotFoundError if no .prt file is found.
+        """
+        prt_files = list(session_path.glob('*.prt'))
+        if not prt_files:
+            raise FileNotFoundError(f"No .prt file found in {session_path}")
+        if len(prt_files) > 1:
+            raise ValueError(f"Multiple .prt files found in {session_path}: {prt_files}")
+        return cls.from_prt(prt_files[0])
+
 
 def create_protocol(patient: str, experiment: str, session: str) -> Protocol:
     """

@@ -1,50 +1,62 @@
 import warnings
 from dataclasses import dataclass
 import numpy as np
-from scipy.interpolate import interpn
 import h5py
+from pathlib import Path
 
 from lys.utils import lys_data_dir
 import os
 
-#TODO: implement lazy loading of the jacobian
 #TODO: reflect on the multi-wavelength thing
+#TODO: what about tranposing? rn we transpose nothing, seems clean?
 
 @dataclass
 class Jacobian:
-    """Represents a Jacobian matrix, which is a 3D numpy array and its associated wavelength."""
+    """Represents a Jacobian matrix with lazy-loaded data from an HDF5 dataset and its associated wavelength."""
 
-    data: np.ndarray
+    data: h5py.Dataset
     wavelength: str  # e.g. 'wl1' or 'wl2'
 
     
     def sample_at_vertices(self, vertices: np.ndarray) -> np.ndarray:
-        """Samples the Jacobian at the given vertices using linear interpolation.
+        """
+        Samples the Jacobian at the given vertices by discretizing coordinates to the nearest integer indices.
 
         Args:
             vertices: A numpy array of shape (N, 3) where N is the number of
                       vertices, and each row represents the (x, y, z)
-                      coordinates of a vertex.
+                      coordinates of a vertex. Coordinates should be in the index space
+                      of the Jacobian data (i.e., between 0 and shape-1 for each axis).
 
         Returns:
-            A numpy array of shape (N,) containing the sampled values.
+            A numpy array of shape (N,) containing the sampled values at the nearest indices.
         """
-        nx, ny, nz = self.data.shape
-        points = (np.arange(nx), np.arange(ny), np.arange(nz))
+        # Round coordinates to nearest integer indices
+        indices = np.rint(vertices).astype(int)
+        # Ensure indices are within bounds
+        assert np.all(indices >= 0) and np.all(indices < np.array(self.data.shape)), \
+            f"Vertex coordinates out of bounds. Expected range [0, {self.data.shape}), got indices with min {indices.min()} and max {indices.max()}"
+        return self.data[indices[:, 0], indices[:, 1], indices[:, 2]]
 
-        return interpn(
-            points,
-            self.data,
-            vertices,
-            method="linear",
-            bounds_error=False,
-            fill_value=0,
-        )
+    def get_slice(self, idx):
+        """
+        Returns a slice of the Jacobian data.
+
+        Args:
+            idx: A tuple of indices or slices, e.g. (i, j, :, :, :) for a 3D block.
+                 The number of elements in the tuple should match the number of dimensions
+                 of the underlying data (e.g., 5 for a 5D array).
+
+        Returns:
+            A numpy array containing the requested slice, loaded into memory.
+        """
+        return self.data[idx]  # h5py.Dataset supports numpy-style slicing
 
 
 class JacobianFactory:
     """
     tl;dr: we don't wanna load the same Jacobian file N-times if it's shared across sessions!
+    this violates OCP (sorta?) because we might have to add _load_from_npy or something like that.
 
     GPT's docstring: 
 
@@ -58,65 +70,54 @@ class JacobianFactory:
     def __init__(self):
         self._cache = {}
 
-    def get(self, path: str) -> Jacobian:
-        """Gets a Jacobian, using a cache to avoid redundant loads."""
-        real_path = os.path.realpath(path)
+    def get(self, path: Path) -> Jacobian:
+        """Gets a Jacobian, using a cache to avoid redundant loads. Expects a Path object."""
+        real_path = path.resolve()
         if real_path in self._cache:
             print(f"Using cached Jacobian from {real_path}")
             return self._cache[real_path]
 
-        print(f"Loading Jacobian from {path}")
         jacobian = self._load_from_file(path)
         self._cache[real_path] = jacobian
         return jacobian
 
-    def _load_from_file(self, path: str) -> Jacobian:
+    def _load_from_file(self, path: Path) -> Jacobian:
         """Loads a Jacobian from a file, dispatching on extension."""
-        wavelength = _extract_wavelength_from_path(path)
-        if path.endswith(".mat"):
+        wavelength = _extract_wavelength_from_path(str(path))
+        if str(path).endswith(".mat"):
             return self._load_from_mat(path, wavelength)
         else:
             raise ValueError(f"Unsupported file extension: {path}")
 
-    def _load_from_mat(self, path: str, wavelength: str) -> Jacobian:
+    def _load_from_mat(self, path: Path, wavelength: str) -> Jacobian:
         """Loads a Jacobian from a MATLAB .mat file."""
-        with h5py.File(path, "r") as f_jac:
-            J_dataset = f_jac["Jacobian"]
-            J_full = J_dataset[()]
-            # Transpose to (192, 256, 256, 16, 24) if original is (24, 16, 256, 256, 192)
-            J = np.transpose(J_full, (4, 3, 2, 1, 0))
-            warnings.warn(
-                "Transposing the raw Jacobian file from MATLAB order to (N,M, 256,256,192). NOT SURE!! "
-            )
-
-            return Jacobian(J, wavelength)
+        print(f"Lazy loading Jacobian from {path}")
+        f_jac = h5py.File(str(path), "r")
+        J_dataset = f_jac["Jacobian"]
+        warnings.warn(
+            "No transpose is done here because we do lazy loading; might need to correct orientation when accessing the data.",
+            UserWarning
+        )
+        return Jacobian(J_dataset, wavelength)
 
 
 _jacobian_factory = JacobianFactory()
 
 
-def load_jacobians(patient: str, experiment: str, session: str) -> list[Jacobian]:
+def load_jacobians_from_session_dir(session_dir: Path) -> list[Jacobian]:
     """
-    Loads all Jacobian files for a given patient, experiment, and session.
-
-    This function uses a factory that caches Jacobians, so if multiple sessions
-    use symlinks to the same Jacobian file, the file will only be loaded once.
+    Loads all Jacobian files in a given session directory.
 
     Args:
-        patient: The patient identifier (e.g., 'P03').
-        experiment: The experiment name (e.g.  'fnirs_8classes').
-        session: The session name (e.g. 'session-01').
+        session_dir: A Path object pointing to the session directory.
 
     Returns:
         A list of Jacobian objects loaded from the corresponding files.
     """
-    paths = _jacobian_paths(patient, experiment, session)
-    return [_jacobian_factory.get(path) for path in paths]
-
-
-def load_jacobian_from(path: str) -> Jacobian:
-    """Loads a Jacobian from a file, using a cache to avoid redundant loads."""
-    return _jacobian_factory.get(path)
+    jacobian_files = _find_jacobian_files(session_dir)
+    print(f"Found {len(jacobian_files)} Jacobian file(s) in {session_dir}")
+    jacobian_files = _find_jacobian_files(session_dir)
+    return [_jacobian_factory.get(path) for path in jacobian_files]
 
 
 def _extract_wavelength_from_path(path: str) -> str:
@@ -141,22 +142,17 @@ def _extract_wavelength_from_path(path: str) -> str:
         raise ValueError(f"Could not determine wavelength from path: {path}")
 
 
-def _jacobian_paths(patient: str, experiment: str, session: str) -> list[str]:
+def _find_jacobian_files(session_dir: Path) -> list[Path]:
     """
-    Constructs a list of paths to all Jacobian files for a given patient, experiment, and session.
+    Finds all files in the session directory with 'jacobian' in their name.
 
     Args:
-        patient: The patient identifier (e.g., 'sub-001').
-        experiment: The experiment name.
-        session: The session name.
+        session_dir: A Path object pointing to the session directory.
 
     Returns:
-        A list of absolute paths to Jacobian files (with 'jacobian' in their names) in the session directory.
+        A list of Path objects for Jacobian files.
     """
-    session_dir = os.path.join(lys_data_dir(), patient, 'nirs', experiment, session)
-    jacobian_files = [os.path.join(session_dir, fname)
-                      for fname in os.listdir(session_dir)
-                      if 'jacobian' in fname.lower()]
+    jacobian_files = [f for f in session_dir.iterdir() if 'jacobian' in f.name.lower()]
     if not jacobian_files:
         raise FileNotFoundError(f"No Jacobian file found in {session_dir}")
     return jacobian_files

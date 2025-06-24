@@ -1,7 +1,7 @@
 import pytest
 import os
 from pathlib import Path
-from lys.utils.paths import check_file_exists, lys_data_dir
+from lys.utils.paths import check_file_exists, lys_data_dir, extract_patient_from_path, get_experiment_name_from_path, get_session_name_from_path
 from lys.objects.session import get_session_paths
 
 def test_check_file_exists():
@@ -41,3 +41,39 @@ def test_get_session_paths(tmp_path, monkeypatch):
     assert set(found_paths) == set(expected_paths)
     for p in found_paths:
         assert isinstance(p, Path)
+
+def test_extract_patient_from_path():
+    # Valid cases
+    assert extract_patient_from_path(Path("/Users/thomasrialan/Documents/code/Geometric-Eigenmodes/data/P03/nirs/fnirs_8classes/session-01")) == "P03"
+    assert extract_patient_from_path(Path("P12/nirs/experiment/session-02")) == "P12"
+    assert extract_patient_from_path(Path("/data/P123/other")) == "P123"
+    assert extract_patient_from_path(Path("/P1/")) == "P1"
+    # Invalid cases
+    with pytest.raises(ValueError):
+        extract_patient_from_path(Path("/Users/foo/Documents/data/03/nirs/session-01"))
+    with pytest.raises(ValueError):
+        extract_patient_from_path(Path("/Users/foo/Documents/data/Patient03/nirs/session-01"))
+    with pytest.raises(ValueError):
+        extract_patient_from_path(Path("/data/PP03/"))
+
+def test_get_experiment_name_from_path():
+    # Valid cases
+    assert get_experiment_name_from_path(Path("/P03/nirs/exp1/session-01")) == "exp1"
+    assert get_experiment_name_from_path(Path("/foo/P12/nirs/experiment/session-02")) == "experiment"
+    assert get_experiment_name_from_path(Path("P123/nirs/expA/session-03")) == "expA"
+    # Invalid cases
+    with pytest.raises(ValueError):
+        get_experiment_name_from_path(Path("/foo/bar/P03/nirs"))
+    with pytest.raises(ValueError):
+        get_experiment_name_from_path(Path("/foo/bar/03/nirs/exp1"))
+
+def test_get_session_name_from_path():
+    # Valid cases
+    assert get_session_name_from_path(Path("/P03/nirs/exp1/session-01")) == "session-01"
+    assert get_session_name_from_path(Path("/foo/P12/nirs/experiment/session-02")) == "session-02"
+    assert get_session_name_from_path(Path("P123/nirs/expA/session-03")) == "session-03"
+    # Invalid cases
+    with pytest.raises(ValueError):
+        get_session_name_from_path(Path("/foo/bar/P03/nirs/exp1"))
+    with pytest.raises(ValueError):
+        get_session_name_from_path(Path("/foo/bar/03/nirs/exp1/session-01"))

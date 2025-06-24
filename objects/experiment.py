@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import List
-from lys.objects.session import Session
+from lys.objects.session import get_session_paths, create_session, Session
 
 @dataclass
 class Experiment:

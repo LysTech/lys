@@ -1,5 +1,10 @@
 # Lys
 
+TODO:
+- go to processing/demo.py and check create_experiment -> still needs some work
+- from there: define a simple processing pipeline
+- coordinates.py, make adjBBX thing general
+
 ## Table of Contents
 
 - [Project Structure](#project-structure)
@@ -154,33 +159,65 @@ The `Patient` class is defined as a frozen dataclass (`@dataclass(frozen=True)`)
 - Encourages a functional programming style, improving code reliability and maintainability.
 
 ### Jacobian
-- **Example Usage:**
 
-```python
-from lys.objects.jacobian import load_jacobians
-
-# Load all Jacobians for a given patient/session
-jacobians = load_jacobians('P03', 'fnirs_8classes', 'session-01')
-
-# Interpolate values at specific 3D coordinates
-vertices = np.array([[10, 20, 30], [40, 50, 60]])
-sampled = jacobians[0].sample_at_vertices(vertices)
-print(sampled)
-```
+The Jacobian module provides efficient loading and sampling of Jacobian matrices with **lazy loading** capabilities. This design ensures that large Jacobian files are only loaded into memory when actually needed, and shared files are cached to avoid redundant loading across sessions.
 
 **Key Features:**
 
-  - The class provides a method `sample_at_vertices(vertices)` to interpolate values from the Jacobian at arbitrary 3D coordinates using linear interpolation.
+- **Lazy Loading**: Jacobian data is stored as HDF5 datasets that are only loaded into memory when accessed, significantly reducing memory usage for large files.
+- **Caching**: The `JacobianFactory` ensures that identical Jacobian files (even via symbolic links) are loaded only once and cached for reuse.
+- **Multi-wavelength Support**: Automatically detects and handles different wavelengths (wl1, wl2) from file paths.
+- **Vertex Sampling**: Provides efficient sampling at arbitrary 3D coordinates using nearest-neighbor interpolation (aka discretizes).
 
-- **Loading Jacobians:**
-  - Use `load_jacobians(patient, experiment, session)` to automatically find and load all Jacobian files for a given subject and session. This returns a list of `Jacobian` objects.
-  - Use `load_jacobian_from(path)` to load a Jacobian from a specific file path. Currently, only MATLAB `.mat` files are supported (with more formats planned).
-  - The function `load_jacobian_from_mat(path)` loads a Jacobian from a MATLAB `.mat` file, handling the necessary transposition to convert MATLAB's storage order to the expected Python/NumPy order. A warning is issued to remind users of this transformation.
+**Example Usage:**
 
-- **Notes:**
-  - Only `.mat` files are currently supported for Jacobian loading. Attempting to load other formats will raise an error.
-  - The code is designed to be extensible for future file types.
+```python
+from lys.objects.jacobian import load_jacobians_from_session_dir
+from pathlib import Path
 
+# Load all Jacobians from a session directory
+session_dir = Path("/path/to/session/directory")
+jacobians = load_jacobians_from_session_dir(session_dir)
+
+# Access individual Jacobians by wavelength
+wl1_jacobian = next(j for j in jacobians if j.wavelength == 'wl1')
+wl2_jacobian = next(j for j in jacobians if j.wavelength == 'wl2')
+
+# Sample values at specific 3D coordinates
+vertices = np.array([[10, 20, 30], [40, 50, 60]])
+sampled_values = wl1_jacobian.sample_at_vertices(vertices)
+print(sampled_values)
+
+# Get a slice of the data (loads into memory)
+data_slice = wl1_jacobian.get_slice((0, :, :, :, :))
+```
+
+**Lazy Loading Architecture:**
+
+The Jacobian system uses a factory pattern with lazy loading to optimize memory usage and performance:
+
+1. **JacobianFactory**: A singleton factory that manages caching of Jacobian objects. It uses canonical file paths as cache keys, so symbolic links pointing to the same file are handled correctly.
+
+2. **Lazy Data Access**: The `Jacobian` class stores an `h5py.Dataset` reference rather than loading the entire array into memory. Data is only loaded when explicitly accessed through methods like `sample_at_vertices()` or `get_slice()`.
+
+3. **Automatic Caching**: When `load_jacobians_from_session_dir()` is called multiple times with the same session directory, the factory returns cached objects instead of reloading files.
+
+**Benefits of Lazy Loading:**
+
+- **Memory Efficiency**: Large Jacobian files (often several GB) are not loaded into memory until needed
+- **Shared File Optimization**: When multiple sessions reference the same Jacobian file (via symlinks), it's loaded only once
+- **Flexible Access**: Supports both point sampling and bulk data access patterns
+- **Scalability**: Can handle many Jacobian files without memory issues
+
+**File Format Support:**
+
+Currently supports MATLAB `.mat` files containing HDF5 datasets. The system is designed to be extensible for additional file formats in the future.
+
+**Notes:**
+
+- Coordinates for `sample_at_vertices()` should be in the index space of the Jacobian data (0 to shape-1 for each axis)
+- The system automatically extracts wavelength information from filenames (looks for 'wl1' or 'wl2' in the path)
+- No data transposition is performed during loading; orientation corrections should be handled when accessing the data
 
 ## Data Folder Structure
 
