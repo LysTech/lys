@@ -20,8 +20,9 @@ Defines classes related to meshes:
 """
 
 #TODO: 
-# - implement the downsample function in Mesh
 # - create our own mesh from a segmentation Volume
+# - what about eigenmodes? shouldn't we be able to do mesh.eigenmodes?
+# - load_unMNI_mesh should just load the mesh from disk if it exists?
 
 
 def load_unMNI_mesh(patient: str, segmentation: Atlas):

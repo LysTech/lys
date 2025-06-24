@@ -10,6 +10,7 @@ from lys.utils.paths import lys_data_dir, extract_patient_from_path
 
 #TODO: add a post-init method that checks time-alignment of everything
 #TODO: refactor using pull-up or something like that for generalisation
+#TODO: think: some experiments will have 2 wavelengths, some might have 6 -> is it ok that raw_data is dict (npz) as solution to this?
 
 @dataclass
 class Session:
@@ -22,7 +23,7 @@ class Session:
         raw_data (np.ndarray): The raw scanner data, shape (n_channels, n_timepoints).
         jacobians (Optional[List[Jacobian]]): The Jacobians (plural for multi-wavelength). Defaults to None.
         physio_data (Optional[np.ndarray]): Physiological data, shape (m_channels, n_timepoints). Defaults to None.
-        processed_data (np.ndarray): Processed data, initialized as a copy of raw_data.
+        processed_data (Optional[np.ndarray]): Processed data, defaults to None.
         metadata (Dict[str, Any]): A dictionary for metadata, including processing steps.
     """
     patient: Patient
@@ -30,7 +31,7 @@ class Session:
     raw_data: np.ndarray
     jacobians: Optional[List[Jacobian]] = None
     physio_data: Optional[np.ndarray] = None
-    processed_data: np.ndarray = field(init=False, repr=False) #Maybe this isn't required and defaults to None?
+    processed_data: Optional[np.ndarray] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -62,7 +63,7 @@ def create_session(path: Path):
       - Patient and protocol information
       - Jacobians
       - Raw data (from 'raw_data.npz', must contain a 'data' array)
-      - Processed data (from 'processed_data.npz', must contain a 'data' array and may contain 'metadata')
+      - Processed data (from 'processed_data.npz', optional, must contain a 'data' array and may contain 'metadata')
       - Physiological data (from 'physio_data.npz', optional, must contain a 'data' array if present)
 
     The processed data's metadata (if present) is attached to the Session's metadata field.
@@ -74,20 +75,20 @@ def create_session(path: Path):
         Session: A fully constructed Session object with all loaded data.
 
     Raises:
-        FileNotFoundError: If 'raw_data.npz' or 'processed_data.npz' is missing, with a message
+        FileNotFoundError: If 'raw_data.npz' is missing, with a message
             indicating that preprocessing steps are required.
     """
     patient = Patient.from_name(extract_patient_from_path(path))
     protocol = Protocol.from_session_path(path)
     jacobians = load_jacobians_from_session_dir(path)
     raw_npz = _load_npz_or_error(path, "raw_channel_data.npz", required=True)
-    processed_npz = _load_npz_or_error(path, "processed_channel_data.npz", required=True)
+    processed_npz = _load_npz_or_error(path, "processed_channel_data.npz", required=False)
     physio_npz = _load_npz_or_error(path, "physio_data.npz", required=False)
 
-    raw_data = raw_npz["data"] if raw_npz is not None else None
-    processed_data = processed_npz["data"] if processed_npz is not None else None
+    raw_data = raw_npz if raw_npz is not None else None
+    processed_data = processed_npz if processed_npz is not None else None
     processed_metadata = processed_npz.get("metadata", {}) if processed_npz is not None else {}
-    physio_data = physio_npz["data"] if physio_npz is not None else None
+    physio_data = physio_npz if physio_npz is not None else None
 
     session = Session(
         patient=patient,
@@ -95,10 +96,9 @@ def create_session(path: Path):
         raw_data=raw_data,
         jacobians=jacobians,
         physio_data=physio_data,
+        processed_data=processed_data,
         metadata=processed_metadata
     )
-    # processed_data is a field(init=False), so set it after construction
-    session.processed_data = processed_data
     return session
 
 

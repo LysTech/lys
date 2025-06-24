@@ -16,6 +16,8 @@ from lys.tests.testing_utils import SNAPSHOT_DIR, FAILED_SNAPSHOT_DIR, compare_i
 Snapshot tests: plot an object, take screenshot on first test run, then compare to saved image pixel by pixel in future tests.
 """
 
+#TODO: a lot of this stuff is slow, should be possible to speec up with mocking etc.
+
 
 
 def test_atlas_snapshot(tmp_path):

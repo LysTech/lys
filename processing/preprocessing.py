@@ -13,13 +13,20 @@ add a new adapter for a new device.
 
 How to use this code:
 
+# Process a single session:
 RawSessionProcessor.process(session_path)
 
+# Process a whole experiment:
+from lys.objects.session import get_session_paths
+paths = get_session_paths("experiment_name", "scanner_name")
+for path in paths:
+    RawSessionProcessor.process(path)
 """
 
 #TODO: BettinaSessionAdapter is a terrible name?
 #TODO: currently we don't do optodes stuff for BettinaSessionAdapter
 #TODO: implement the Flow2SessionAdapter
+#TODO: generally figure out the optodes thing, see comment in Notion Architecture page
 
 class RawSessionProcessor:
     def __init__(self, session_path: Path):
