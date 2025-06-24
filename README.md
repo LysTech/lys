@@ -10,6 +10,7 @@ TODO:
 - [Project Structure](#project-structure)
 - [Documentation](#documentation)
 - [Visualization](#visualization)
+- [Preprocessing](#preprocessing)
 - [Patient Class](#patient-class)
 - [Jacobian](#jacobian)
 - [Data Directory Setup](#data-directory-setup)
@@ -109,6 +110,57 @@ StaticDataMesh and TimeSeriesDataMesh styles can be changed with: new opacities,
 
 To ensure that visualization outputs remain consistent over time, Lys uses **snapshot tests**. These tests render objects (such as meshes, atlases, and optodes), save a reference image (snapshot) on the first run, and compare future renders pixel-by-pixel against this snapshot. If a rendering changes unexpectedly, the test will fail, helping to catch regressions or unintended changes in visualization. You can find these tests in `tests/test_plot3d_snapshot.py` and the reference images in `tests/snapshots/`.
 
+### Preprocessing
+
+The preprocessing module is responsible for converting raw data files from various device-specific formats into standardized `.npz` files that can be efficiently loaded for further processing. This is distinct from processing, which handles operations like bandpass filtering and other signal processing tasks.
+
+The system uses the **Strategy pattern** to automatically select the appropriate adapter based on the session content, making it easy to add support for new devices by implementing new adapters.
+
+**How to Use Preprocessing:**
+
+```python
+from lys.processing.preprocessing import RawSessionProcessor
+from lys.objects.session import get_session_paths
+from pathlib import Path
+
+# Process a single session:
+session_path = Path("/path/to/session/directory")
+RawSessionProcessor.process(session_path)
+
+# Process a whole experiment:
+paths = get_session_paths("experiment_name", "scanner_name")
+for path in paths:
+    RawSessionProcessor.process(path)
+```
+
+**How It Works:**
+
+1. **Automatic Adapter Selection**: The `RawSessionProcessor` automatically detects the appropriate adapter by examining the files in the session directory
+2. **Device-Specific Processing**: Each adapter (like `BettinaSessionAdapter`) handles the specific file formats and data extraction for that device
+3. **Standardized Output**: All adapters produce `.npz` files with consistent naming (`raw_channel_data.npz`) for easy loading
+
+**Current Supported Devices:**
+
+- **Bettina Device**: Processes `.wl1` and `.wl2` files, extracting wavelength-specific data
+
+**Extending for New Devices:**
+
+To add support for a new device, implement a new adapter class that inherits from `ISessionAdapter`:
+
+```python
+class NewDeviceAdapter(ISessionAdapter):
+    def can_handle(self, session_path: Path) -> bool:
+        # Check for device-specific files
+        files = [f.name for f in session_path.iterdir() if f.is_file()]
+        return any(file.endswith(".device_specific_extension") for file in files)
+    
+    def extract_data(self, session_path: Path) -> dict:
+        # Extract and return data as dictionary
+        # Keys will become npz file keys
+        return {'channel_data': data_array, 'metadata': metadata}
+```
+
+The system will automatically detect and use your new adapter when processing sessions that contain the appropriate files.
 
 ## Data Directory Setup
 

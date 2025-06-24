@@ -30,7 +30,7 @@ class Session:
     raw_data: np.ndarray
     jacobians: Optional[List[Jacobian]] = None
     physio_data: Optional[np.ndarray] = None
-    processed_data: np.ndarray = field(init=False, repr=False)
+    processed_data: np.ndarray = field(init=False, repr=False) #Maybe this isn't required and defaults to None?
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -80,8 +80,8 @@ def create_session(path: Path):
     patient = Patient.from_name(extract_patient_from_path(path))
     protocol = Protocol.from_session_path(path)
     jacobians = load_jacobians_from_session_dir(path)
-    raw_npz = _load_npz_or_error(path, "raw_data.npz", required=True)
-    processed_npz = _load_npz_or_error(path, "processed_data.npz", required=True)
+    raw_npz = _load_npz_or_error(path, "raw_channel_data.npz", required=True)
+    processed_npz = _load_npz_or_error(path, "processed_channel_data.npz", required=True)
     physio_npz = _load_npz_or_error(path, "physio_data.npz", required=False)
 
     raw_data = raw_npz["data"] if raw_npz is not None else None
@@ -100,6 +100,7 @@ def create_session(path: Path):
     # processed_data is a field(init=False), so set it after construction
     session.processed_data = processed_data
     return session
+
 
 def get_session_paths(experiment_name, scanner_name):
     """
