@@ -41,7 +41,9 @@ class Session:
         Post-initialization method to set default values that depend on other fields.
         """
         if self.processed_data is None:
-            self.processed_data = self.raw_data
+            self.processed_data = {
+                key: value.copy() for key, value in self.raw_data.items()
+            }
 
 
 def _load_npz_or_error(path: Path, filename: str, required: bool = True) -> Optional[dict]:

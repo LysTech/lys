@@ -43,7 +43,7 @@ def create_test_session() -> Session:
     
     dummy_protocol = Mock(spec=Protocol)
     
-    raw_data = np.array([[1, 2, 3], [4, 5, 6]])
+    raw_data = {"wl1": np.array([[1, 2, 3], [4, 5, 6]])}
     return Session(patient=dummy_patient, protocol=dummy_protocol, raw_data=raw_data)
 
 

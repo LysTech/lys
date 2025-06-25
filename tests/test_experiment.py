@@ -12,8 +12,8 @@ class DummyProtocol:
 def make_dummy_session(subject_id):
     patient = DummyPatient(subject_id)
     protocol = DummyProtocol()
-    # raw_data is required, so pass a dummy array
-    raw_data = np.zeros((1, 1))
+    # raw_data is required, so pass a dummy dict with wavelength keys and numpy arrays
+    raw_data = {'wl1': np.zeros((1, 1))}
     return Session(patient=patient, protocol=protocol, raw_data=raw_data)
 
 def test_filter_by_subjects():

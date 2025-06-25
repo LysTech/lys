@@ -1,6 +1,8 @@
 # Lys
 
 TODO:
+- most important one is to sit down with Anthony and/or Nyx and get input on this / maybe we can re-diagram things and have a second think now that lots of stuff is implemented -> there'll probably be some good refactors to do. I think the code is sufficiently modular that this shouldn't be too hard (??)
+- (lots of #TODO tags throughout the code, grep for them and fix)
 - go to processing/demo.py and check create_experiment -> still needs some work
 - from there: define a simple processing pipeline
 - coordinates.py, make adjBBX thing general
@@ -15,6 +17,31 @@ TODO:
 - [Jacobian](#jacobian)
 - [Data Directory Setup](#data-directory-setup)
 - [Data Folder Structure](#data-folder-structure)
+
+## Quick Start Demo
+
+Here's a simple example of how to use Lys to process an experiment with bandpass filtering:
+
+```python
+from lys.objects.experiment import create_experiment
+from lys.processing.pipeline import ProcessingPipeline
+
+# Create an experiment
+experiment_name = "fnirs_8classes"
+experiment = create_experiment(experiment_name, "nirs")
+
+# Configure processing steps: these must be defined in processing/steps.py
+config = {
+    "BandpassFilter": {
+        "upper_bound": 0.1,
+        "lower_bound": 0.01,
+    },
+}
+
+# Apply the processing pipeline
+processing_pipeline = ProcessingPipeline(config)
+experiment = processing_pipeline.apply(experiment)
+```
 
 ## Project Structure
 
