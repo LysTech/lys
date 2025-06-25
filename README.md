@@ -24,7 +24,7 @@ from lys.objects.experiment import create_experiment
 from lys.processing.pipeline import ProcessingPipeline
 
 # Create an experiment
-experiment_name = "fnirs_8classes"
+experiment_name = "fnirs_8classes" #this needs to be an actual folder on your file system
 experiment = create_experiment(experiment_name, "nirs")
 
 # Configure processing steps: these must be defined in processing/steps.py
