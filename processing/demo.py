@@ -10,7 +10,6 @@ config = {
     },
 }
 
-
 processing_pipeline = ProcessingPipeline(config)
 dataset = processing_pipeline.run(experiment)
 

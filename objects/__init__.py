@@ -14,3 +14,4 @@ from lys.objects.atlas import Atlas
 from lys.objects.patient import Patient
 from lys.objects.protocol import Protocol
 from lys.objects.session import Session
+from lys.objects.experiment import Experiment
