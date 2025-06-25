@@ -3,6 +3,7 @@
 TODO:
 - most important one is to sit down with Anthony and/or Nyx and get input on this / maybe we can re-diagram things and have a second think now that lots of stuff is implemented -> there'll probably be some good refactors to do. I think the code is sufficiently modular that this shouldn't be too hard (??)
 - (lots of #TODO tags throughout the code, grep for them and fix)
+- I've not implemented Tasks and stuff related to recording new data, this is the next big thing after code review
 
 ## Table of Contents
 
