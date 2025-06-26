@@ -8,6 +8,7 @@ TODO:
 ## Table of Contents
 
 - [Project Structure](#project-structure)
+- [Scripts](#scripts)
 - [Documentation](#documentation)
 - [Visualization](#visualization)
 - [Preprocessing](#preprocessing)
@@ -56,6 +57,13 @@ lys/
 │   ├── session.py
 │   ├── volume.py
 │   └── __init__.py
+├── processing/
+│   ├── pipeline.py
+│   ├── preprocessing.py
+│   └── steps.py
+├── scripts/
+│   ├── processing_demo.py
+│   └── viz_demo.py
 ├── utils/
 │   ├── coordinates.py
 │   ├── paths.py   
@@ -66,6 +74,12 @@ lys/
 └── tests/  
 ```
 
+## Scripts
+
+The `/scripts` directory contains example scripts that demonstrate how to use the Lys library. This separation of concerns keeps the core library code (in `/objects`, `/visualization`, and `/utils`) stable and reusable, while allowing experimentation and result generation to happen in dedicated script files. The scripts include:
+
+- `processing_demo.py`: Demonstrates experiment processing with bandpass filtering
+- `viz_demo.py`: Shows 3D visualization capabilities with meshes and optodes
 
 ## Documentation
 

@@ -16,3 +16,5 @@ config = {
 processing_pipeline = ProcessingPipeline(config)
 experiment = processing_pipeline.apply(experiment)
 
+#TODO: can we put the whole reconstruction pipeline here EASILY?
+
