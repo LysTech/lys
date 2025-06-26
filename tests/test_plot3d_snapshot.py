@@ -22,7 +22,7 @@ Snapshot tests: plot an object, take screenshot on first test run, then compare 
 
 def test_atlas_snapshot(tmp_path):
     """Test that rendering an atlas segmentation produces the expected image."""
-    seg = load_charm_segmentation("P03", show=False)
+    seg = load_charm_segmentation("P03")
     scene = VTKScene()
     scene.add(seg)
     out_path = tmp_path / "atlas.png"
@@ -65,7 +65,7 @@ def test_atlas_dynamic_legend(tmp_path):
     - Show the label again: should match initial snapshot
     """
     # Arrange
-    seg = load_charm_segmentation("P03", show=False)
+    seg = load_charm_segmentation("P03")
     scene = VTKScene()
     scene.add(seg)
     out_path = tmp_path / "atlas.png"

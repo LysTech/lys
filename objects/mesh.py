@@ -1,5 +1,7 @@
 import os
+import warnings
 import numpy as np
+from numpy.linalg import eig
 from scipy.io import loadmat
 import vtk
 from vtk.util import numpy_support
@@ -10,6 +12,7 @@ from lys.objects.segmentation import load_charm_segmentation
 from lys.objects.atlas import Atlas
 from lys.utils.coordinates import align_with_csf, undo_the_scaling, undo_affine_transformation, read_adjBBX_file
 from lys.interfaces.plottable import Plottable
+from lys.objects.eigenmodes import Eigenmode, load_eigenmodes
 
 """
 Defines classes related to meshes:
@@ -41,14 +44,18 @@ def load_unMNI_mesh(patient: str):
     mni_mesh = from_mat(mni_mesh_path(patient))
     segmentation = load_charm_segmentation(patient)
     nativespace_mesh = mni_to_nativespace(mni_mesh, segmentation, patient)
+    eigenmodes = load_eigenmodes(patient)
+    nativespace_mesh.eigenmodes = eigenmodes
     VTKScene().add(segmentation).add(nativespace_mesh).show() # plot for visual check
     return nativespace_mesh
 
 
+
 class Mesh(Plottable):
-    def __init__(self, vertices, faces):
+    def __init__(self, vertices, faces, eigenmodes: List[Eigenmode] | None = None):
         self.faces = faces
         self.vertices = vertices
+        self.eigenmodes = eigenmodes
         self._check_mesh()
 
     def downsample(self, target_vertices: int) -> 'Mesh':
@@ -107,6 +114,8 @@ class Mesh(Plottable):
         assert len(self.faces) != 0, "Mesh has no faces"
         min_face_idx = min([min(f) for f in self.faces])
         assert min_face_idx == 0, f"Expected 0-indexed faces, got {min_face_idx}"
+        if self.eigenmodes is None:
+            warnings.warn("This mesh has no eigenmodes.")
 
     def to_vtk(self, cmap: str = "viridis", opacity: float = 1.0, **kw) -> vtk.vtkActor:
         """Convert mesh to VTK actor."""
@@ -183,7 +192,7 @@ class StaticMeshData(Plottable):
         
         return [actor, scalar_bar]
 
-    def apply_style(self, actor: vtk.vtkActor, cmap: str = None, opacity: float = None, **kw):
+    def apply_style(self, actor: vtk.vtkActor, cmap: str | None = None, opacity: float | None = None, **kw):
         """Apply styling to existing VTK actor."""
         from lys.visualization.utils import get_vtk_colormap
         
@@ -192,8 +201,11 @@ class StaticMeshData(Plottable):
         if not isinstance(actor.GetMapper(), vtk.vtkPolyDataMapper):
             return
 
-        # Apply base mesh styling first
-        self.mesh.apply_style(actor, opacity=opacity, **kw)
+        # Apply base mesh styling first - only pass opacity if it's not None
+        if opacity is not None:
+            self.mesh.apply_style(actor, opacity=opacity, **kw)
+        else:
+            self.mesh.apply_style(actor, **kw)
         
         mapper = actor.GetMapper()
         
@@ -282,7 +294,8 @@ def mni_to_nativespace(mesh: Mesh, segmentation: Atlas, patient: str):
     vertices = undo_affine_transformation(vertices, affine_matrix)
     vertices = vertices + np.array([128, 128, 96])  # AC point starts at O -> move it
     vertices = align_with_csf(vertices, vol, tissue)
-    return Mesh(vertices, faces)
+    mesh.vertices = vertices
+    return mesh
 
 
 def mni_mesh_path(patient: str) -> str:

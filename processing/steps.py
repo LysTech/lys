@@ -4,6 +4,19 @@ from scipy import signal
 from lys.objects import Session
 from lys.interfaces.processing_step import ProcessingStep
 
+class ZTransform(ProcessingStep):
+    def _do_process(self, session: Session) -> None:
+        """ this modifies session.processed_data inplace """
+        session.processed_data["wl1"] = self.z_transform(session.processed_data["wl1"])
+        session.processed_data["wl2"] = self.z_transform(session.processed_data["wl2"])
+
+    def z_transform(self, data: np.ndarray) -> np.ndarray:
+        """
+        Apply a Z-transform to the data.
+        """
+        return data
+
+
 
 class BandpassFilter(ProcessingStep):
     """

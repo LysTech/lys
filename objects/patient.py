@@ -35,6 +35,6 @@ class Patient:
         Returns:
             A new Patient instance.
         """
-        segmentation = load_charm_segmentation(name, show=False)
+        segmentation = load_charm_segmentation(name)
         mesh = load_unMNI_mesh(name)
         return cls(name, segmentation, mesh)

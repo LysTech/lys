@@ -8,5 +8,6 @@ implementations must follow.
 
 from lys.interfaces.plottable import Plottable
 from lys.interfaces.processing_step import ProcessingStep
+from lys.interfaces.session_adapters import ISessionAdapter
 
-__all__ = ['Plottable', 'ProcessingStep'] 
+__all__ = ['Plottable', 'ProcessingStep', 'ISessionAdapter'] 

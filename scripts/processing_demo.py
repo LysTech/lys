@@ -4,11 +4,14 @@ from lys.processing.pipeline import ProcessingPipeline
 experiment_name = "fnirs_8classes"
 experiment = create_experiment(experiment_name, "nirs")
 
+#TODO: would be more explicit that order is kept if config was a list
+
 config = {
     "BandpassFilter": {
         "upper_bound": 0.1,
         "lower_bound": 0.01,
     },
+    "ZTransform": {},
 }
 
 #TODO: metadata should store the params! why?
