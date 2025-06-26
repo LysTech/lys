@@ -14,7 +14,7 @@ def test_protocol_from_dict_orders_intervals():
     starts = [t[0] for t in protocol.intervals]
     assert starts == sorted(starts)
     labels = [t[2] for t in protocol.intervals]
-    assert set(labels) == {'A', 'B'}
+    assert protocol.tasks == {'A', 'B'}
 
 
 def test_protocol_from_dict_content():

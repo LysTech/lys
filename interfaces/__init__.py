@@ -6,6 +6,7 @@ for the lys library. These interfaces establish contracts that concrete
 implementations must follow.
 """
 
-from .plottable import Plottable
+from lys.interfaces.plottable import Plottable
+from lys.interfaces.processing_step import ProcessingStep
 
-__all__ = ['Plottable'] 
+__all__ = ['Plottable', 'ProcessingStep'] 

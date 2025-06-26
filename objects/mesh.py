@@ -5,8 +5,6 @@ import vtk
 from vtk.util import numpy_support
 from typing import List, Tuple
 
-from lys.visualization.plot3d import VTKScene
-from lys.visualization.utils import _make_scalar_bar, get_vtk_colormap
 from lys.utils.paths import lys_data_dir
 from lys.objects.segmentation import load_charm_segmentation
 from lys.objects.atlas import Atlas
@@ -39,6 +37,7 @@ def load_unMNI_mesh(patient: str):
     - decorate this function with a cache decorator (might be too clever / hide problems?)
     - we save unMNI'd meshes to disk explicity (rather than in a cache) and load them
     """
+    from lys.visualization.plot3d import VTKScene
     mni_mesh = from_mat(mni_mesh_path(patient))
     segmentation = load_charm_segmentation(patient)
     nativespace_mesh = mni_to_nativespace(mni_mesh, segmentation, patient)
@@ -47,13 +46,9 @@ def load_unMNI_mesh(patient: str):
 
 
 class Mesh(Plottable):
-    def __init__(self, vertices, faces, show = True):
-        """ Construct mesh and show it if show is True """
+    def __init__(self, vertices, faces):
         self.faces = faces
         self.vertices = vertices
-        if show:
-            _scene = VTKScene()
-            _scene.add(self).show()
         self._check_mesh()
 
     def downsample(self, target_vertices: int) -> 'Mesh':
@@ -66,7 +61,7 @@ class Mesh(Plottable):
             Mesh: The downsampled mesh.
         """
         if target_vertices >= len(self.vertices):
-            return Mesh(self.vertices.copy(), self.faces.copy(), show=False)
+            return Mesh(self.vertices.copy(), self.faces.copy())
 
         decimate = vtk.vtkQuadricDecimation()
         
@@ -102,7 +97,7 @@ class Mesh(Plottable):
         # Reshape the flat array from VTK back into a faces array
         new_faces = new_faces_numpy.reshape(-1, 4)[:, 1:]
 
-        return Mesh(new_vertices, new_faces, show=False)
+        return Mesh(new_vertices, new_faces)
 
     def _check_mesh(self):
         """ Check mesh properties:
@@ -138,7 +133,7 @@ class Mesh(Plottable):
         actor.GetProperty().SetOpacity(opacity)
         return actor
     
-    def apply_style(self, actor: vtk.vtkActor, opacity: float = None, **kw):
+    def apply_style(self, actor: vtk.vtkActor, opacity: float = 1.0, **kw):
         """Apply styling to existing VTK actor. This violates Open-Closed Principle because
         when we add a new style to a mesh we need to change this method, but I doubt this will happen much."""
         if opacity is not None:
@@ -158,6 +153,8 @@ class StaticMeshData(Plottable):
 
     def to_vtk(self, cmap: str = "viridis", opacity: float = 1.0, **kw) -> List[vtk.vtkProp]:
         """Convert static mesh data to VTK actors (mesh + scalar bar)."""
+        from lys.visualization.utils import _make_scalar_bar, get_vtk_colormap
+        
         # Get the base mesh actor
         actor = self.mesh.to_vtk(opacity=opacity, **kw)
         mapper = actor.GetMapper()
@@ -188,6 +185,8 @@ class StaticMeshData(Plottable):
 
     def apply_style(self, actor: vtk.vtkActor, cmap: str = None, opacity: float = None, **kw):
         """Apply styling to existing VTK actor."""
+        from lys.visualization.utils import get_vtk_colormap
+        
         # This method is called for each actor associated with the object.
         # We only want to act when called with the main mesh actor, which has a PolyDataMapper.
         if not isinstance(actor.GetMapper(), vtk.vtkPolyDataMapper):
@@ -283,7 +282,7 @@ def mni_to_nativespace(mesh: Mesh, segmentation: Atlas, patient: str):
     vertices = undo_affine_transformation(vertices, affine_matrix)
     vertices = vertices + np.array([128, 128, 96])  # AC point starts at O -> move it
     vertices = align_with_csf(vertices, vol, tissue)
-    return Mesh(vertices, faces, show=False)
+    return Mesh(vertices, faces)
 
 
 def mni_mesh_path(patient: str) -> str:

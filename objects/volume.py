@@ -3,20 +3,15 @@ import json
 import numpy as np
 import pprint
 
-from lys.visualization.plot3d import VTKScene
-from lys.visualization.utils import get_vtk_colormap
 from lys.interfaces.plottable import Plottable
 
 
 class Volume(Plottable):
-    def __init__(self, array, metadata={}, show=True):
+    def __init__(self, array, metadata={}):
         """ Construct volume and show it if show is True """
         self.array = array
         self.metadata = metadata
         self._check_volume()
-        if show:
-            _scene = VTKScene()
-            _scene.add(self).show()
     
     def _check_volume(self):
         """ Check volume properties:
@@ -70,6 +65,7 @@ class Volume(Plottable):
     def apply_style(self, actor: vtk.vtkActor, opacity: float = None, color: tuple = None, 
                    data_range: tuple = None, cmap: str = None, **kw):
         """Apply styling to existing VTK actor."""
+        from lys.visualization.utils import get_vtk_colormap
         if opacity is not None:
             actor.GetProperty().SetOpacity(opacity)
         if color is not None:

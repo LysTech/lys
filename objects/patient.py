@@ -1,7 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 
-from lys.objects.mesh import Mesh, load_unMNI_mesh
+from lys.objects.mesh import load_unMNI_mesh, Mesh
 from lys.objects.segmentation import load_charm_segmentation
 from lys.objects.atlas import Atlas
 

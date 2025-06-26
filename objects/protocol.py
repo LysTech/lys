@@ -1,7 +1,8 @@
 from dataclasses import dataclass, field
-from typing import List, Tuple, Any, Dict, ClassVar
+from typing import List, Tuple, Any, Dict, ClassVar, Set
 from pathlib import Path
 import os
+import numpy as np
 from lys.utils.paths import lys_data_dir, check_file_exists
 
 #TODO: check how slow it would be to just read the file every time, if too slow: think about caching but... seems unlikely?
@@ -14,6 +15,13 @@ class Protocol:
     Respects OCP: we can add a from_whatever constructor for our future formats.
     """
     intervals: List[Tuple[float, float, str]] = field(default_factory=list)
+
+    @property
+    def tasks(self) -> Set[str]:
+        """
+        Returns the set of unique task labels in the protocol.
+        """
+        return set([interval[2] for interval in self.intervals])
 
     @classmethod
     def from_dict(cls, protocol_dict: Dict[str, List[Tuple[float, float]]]) -> 'Protocol':

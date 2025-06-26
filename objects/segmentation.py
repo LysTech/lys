@@ -14,7 +14,7 @@ def load_charm_segmentation(patient: str, show: bool = True) -> Atlas:
     validate_patient_string(patient)
     path = _segmentation_path(patient)
     check_file_exists(path)
-    volume = from_jnii(path, show=False)
+    volume = from_jnii(path)
     return Atlas(volume.array.astype(np.int32), show=show)
 
 

@@ -1,7 +1,9 @@
 import numpy as np
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
-from lys.objects.session import Session
+if TYPE_CHECKING:
+    from lys.objects.session import Session
 
 class ProcessingStep(ABC):
     """
@@ -15,7 +17,7 @@ class ProcessingStep(ABC):
     Only session.processed_data and session.metadata should be modified.
     """
     
-    def process(self, session: Session) -> None:
+    def process(self, session: 'Session') -> None:
         """
         Template method that enforces metadata recording.
         
@@ -32,7 +34,7 @@ class ProcessingStep(ABC):
         self._record_processing_step(session)
     
     @abstractmethod
-    def _do_process(self, session: Session) -> None:
+    def _do_process(self, session: 'Session') -> None:
         """
         Actual processing logic - implement this method in subclasses.
         
@@ -44,7 +46,7 @@ class ProcessingStep(ABC):
         """
         pass
     
-    def _record_processing_step(self, session: Session, **kwargs) -> None:
+    def _record_processing_step(self, session: 'Session', **kwargs) -> None:
         """
         Record processing information in session metadata.
         

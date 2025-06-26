@@ -5,7 +5,9 @@ from pathlib import Path
 import numpy as np
 
 from lys.objects.jacobian import load_jacobians_from_session_dir
-from lys.objects import Patient, Protocol, Jacobian
+from lys.objects.patient import Patient
+from lys.objects.protocol import Protocol
+from lys.objects.jacobian import Jacobian
 from lys.utils.paths import lys_data_dir, extract_patient_from_path
 
 #TODO: add a post-init method that checks time-alignment of everything
