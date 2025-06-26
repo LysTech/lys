@@ -25,19 +25,21 @@ Defines classes related to meshes:
 # - load_unMNI_mesh should just load the mesh from disk if it exists?
 
 
-def load_unMNI_mesh(patient: str, segmentation: Atlas):
+def load_unMNI_mesh(patient: str):
     """ 
     patient: e.g. "P03"
     segmentation: Atlas object, required for alignment to native space
 
-    I'm not sure if this is good code. Doing the transformation in the constructor is maybe
-    not very good? Annoying to have to load the segmentation.
+    I'm not sure if this is good code. 
+    - Doing the transformation in the constructor is maybe not good?
+    - loading segmentation is bad for memory/performance because Patient.from_name loads seg twice as a result
     
     Possible improvements:
     - decorate this function with a cache decorator (might be too clever / hide problems?)
     - we save unMNI'd meshes to disk explicity (rather than in a cache) and load them
     """
     mni_mesh = from_mat(mni_mesh_path(patient))
+    segmentation = load_charm_segmentation(patient)
     nativespace_mesh = mni_to_nativespace(mni_mesh, segmentation, patient)
     VTKScene().add(segmentation).add(nativespace_mesh).show() # plot for visual check
     return nativespace_mesh

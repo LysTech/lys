@@ -1,6 +1,6 @@
 import numpy as np
 from pathlib import Path
-from processing.preprocessing import BettinaSessionAdapter, RawSessionProcessor
+from processing.preprocessing import BettinaSessionAdapter, RawSessionPreProcessor
 import pytest
 
 
@@ -58,7 +58,7 @@ def test_raw_session_processor_selects_bettina_adapter(tmp_path):
     """RawSessionProcessor selects BettinaSessionAdapter when .wl1 and .wl2 files are present."""
     (tmp_path / 'test.wl1').touch()
     (tmp_path / 'test.wl2').touch()
-    processor = RawSessionProcessor(tmp_path)
+    processor = RawSessionPreProcessor(tmp_path)
     assert isinstance(processor.session_adapter, BettinaSessionAdapter)
 
 
@@ -69,7 +69,7 @@ def test_raw_session_processor_processes_bettina_session(tmp_path):
     write_dummy_file(tmp_path / 'data.wl1', wl1_data)
     write_dummy_file(tmp_path / 'data.wl2', wl2_data)
     
-    RawSessionProcessor.process(tmp_path)
+    RawSessionPreProcessor.preprocess(tmp_path)
     
     output_file = tmp_path / 'raw_channel_data.npz'
     assert output_file.exists()
@@ -83,10 +83,10 @@ def test_raw_session_processor_raises_error_for_unsupported_session(tmp_path):
     (tmp_path / 'random.txt').touch()
     
     with pytest.raises(ValueError, match="No suitable adapter found"):
-        RawSessionProcessor.process(tmp_path)
+        RawSessionPreProcessor.preprocess(tmp_path)
 
 
 def test_raw_session_processor_raises_error_for_empty_session(tmp_path):
     """RawSessionProcessor raises ValueError for empty sessions."""
     with pytest.raises(ValueError, match="No suitable adapter found"):
-        RawSessionProcessor.process(tmp_path) 
+        RawSessionPreProcessor.preprocess(tmp_path) 

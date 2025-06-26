@@ -144,23 +144,23 @@ The system uses the **Strategy pattern** to automatically select the appropriate
 **How to Use Preprocessing:**
 
 ```python
-from lys.processing.preprocessing import RawSessionProcessor
+from lys.processing.preprocessing import RawSessionPreProcessor
 from lys.objects.session import get_session_paths
 from pathlib import Path
 
 # Process a single session:
 session_path = Path("/path/to/session/directory")
-RawSessionProcessor.process(session_path)
+RawSessionPreProcessor.preprocess(session_path)
 
 # Process a whole experiment:
 paths = get_session_paths("experiment_name", "scanner_name")
 for path in paths:
-    RawSessionProcessor.process(path)
+    RawSessionPreProcessor.preprocess(path)
 ```
 
 **How It Works:**
 
-1. **Automatic Adapter Selection**: The `RawSessionProcessor` automatically detects the appropriate adapter by examining the files in the session directory
+1. **Automatic Adapter Selection**: The `RawSessionPreProcessor` automatically detects the appropriate adapter by examining the files in the session directory
 2. **Device-Specific Processing**: Each adapter (like `BettinaSessionAdapter`) handles the specific file formats and data extraction for that device
 3. **Standardized Output**: All adapters produce `.npz` files with consistent naming (`raw_channel_data.npz`) for easy loading
 

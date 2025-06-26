@@ -17,8 +17,7 @@ def test_mesh_downsample_snapshot(tmp_path):
     - Optionally checks faces are correctly reindexed
     - Compares rendered image to snapshot
     """
-    segmentation = load_charm_segmentation("P03", show=False)
-    mesh = load_unMNI_mesh("P03", segmentation)
+    mesh = load_unMNI_mesh("P03")
     n_vertices_orig = mesh.vertices.shape[0]
     assert n_vertices_orig > 10000, f"Expected >10k vertices, got {n_vertices_orig}"
 
