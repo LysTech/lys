@@ -11,6 +11,7 @@ from lys.utils.paths import lys_data_dir
 from lys.objects.segmentation import load_charm_segmentation
 from lys.objects.atlas import Atlas
 from lys.utils.coordinates import align_with_csf, undo_the_scaling, undo_affine_transformation, read_adjBBX_file
+from lys.interfaces.plottable import Plottable
 
 """
 Defines classes related to meshes:
@@ -45,7 +46,7 @@ def load_unMNI_mesh(patient: str):
     return nativespace_mesh
 
 
-class Mesh:
+class Mesh(Plottable):
     def __init__(self, vertices, faces, show = True):
         """ Construct mesh and show it if show is True """
         self.faces = faces
@@ -144,7 +145,7 @@ class Mesh:
             actor.GetProperty().SetOpacity(opacity)
 
 
-class StaticMeshData:
+class StaticMeshData(Plottable):
     """ Mesh with one value per vertex, useful for plotting. """
     def __init__(self, mesh: Mesh, data: np.ndarray):
         self.mesh = mesh
@@ -222,7 +223,7 @@ class StaticMeshData:
             poly.Modified()
 
 
-class TimeSeriesMeshData:
+class TimeSeriesMeshData(Plottable):
     """ Mesh with one timeseries per vertex, useful for plotting. """
     def __init__(self, mesh: Mesh, timeseries: np.ndarray, current_timepoint: int = 0):
         self.mesh = mesh

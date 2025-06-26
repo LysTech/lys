@@ -9,6 +9,8 @@ from vtkmodules.qt.QVTKRenderWindowInteractor import (
 import vtk
 import numpy as np
 
+from lys.interfaces.plottable import Plottable
+
 @dataclass
 class _Handle:
     """Tracks a single VTK actor and its styling metadata."""
@@ -44,9 +46,9 @@ class VTKScene:
         return slider
 
     def add(self, obj: Any, **style) -> "VTKScene":
-        """Add any object that has a to_vtk() method."""
-        if not hasattr(obj, 'to_vtk'):
-            raise TypeError(f"Object {type(obj).__name__} must have a 'to_vtk()' method")
+        """Add any object that implements the Plottable interface."""
+        if not isinstance(obj, Plottable):
+            raise TypeError(f"Object {type(obj).__name__} must implement the Plottable interface")
         
         actors = obj.to_vtk(**style)
         if not isinstance(actors, (list, tuple)):
@@ -109,9 +111,9 @@ class VTKScene:
         return self
     
     def style(self, obj: Any, **updates) -> "VTKScene":
-        """Update styling for any object that has apply_style() method."""
-        if not hasattr(obj, 'apply_style'):
-            raise TypeError(f"Object {type(obj).__name__} must have an 'apply_style()' method")
+        """Update styling for any object that implements the Plottable interface."""
+        if not isinstance(obj, Plottable):
+            raise TypeError(f"Object {type(obj).__name__} must implement the Plottable interface")
         
         obj_id = id(obj)
         if obj_id not in self._obj_to_handles:
@@ -180,7 +182,7 @@ class VTKScene:
     def show(self, size=(800, 600), title="VTK Scene", block=False):
         """Open a Qt window with the scene."""
         # 1 — make sure a Qt application exists *first*
-        self._enable_qt_integration()     # Jupyter “%gui qt5”, optional
+        self._enable_qt_integration()     # Jupyter "%gui qt5", optional
         self._ensure_qt_app()             # creates / fetches QApplication
 
         # 2 — create (or reuse) the main window **after** QApplication

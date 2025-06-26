@@ -5,9 +5,10 @@ import colorsys
 from vtk.util import numpy_support
 
 from lys.visualization.plot3d import VTKScene
+from lys.interfaces.plottable import Plottable
 
 
-class Atlas:
+class Atlas(Plottable):
     """A volume with discrete regions, each having a unique integer label."""
     
     def __init__(self, array: np.ndarray, metadata: dict = {}, label_names: Optional[Dict[int, str]] = None, show: bool = True):

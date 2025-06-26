@@ -4,9 +4,11 @@ import numpy as np
 import pprint
 
 from lys.visualization.plot3d import VTKScene
+from lys.visualization.utils import get_vtk_colormap
+from lys.interfaces.plottable import Plottable
 
 
-class Volume:
+class Volume(Plottable):
     def __init__(self, array, metadata={}, show=True):
         """ Construct volume and show it if show is True """
         self.array = array

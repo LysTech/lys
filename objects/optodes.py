@@ -2,10 +2,12 @@ from typing import List, Tuple, Union
 import numpy as np
 import vtk
 
+from lys.interfaces.plottable import Plottable
+
 #TODO: implement create_flow2_optodes_from_volume
 
 
-class Points:
+class Points(Plottable):
     def __init__(self, coordinates: List[Tuple[float, float, float]], 
                  color: Tuple[float, float, float] = (1.0, 0.0, 0.0),
                  radius: float = 1.0):
@@ -81,7 +83,7 @@ class Points:
             mapper = actor.GetMapper()
             mapper.SetInputConnection(sphere.GetOutputPort())
 
-class Optodes:
+class Optodes(Plottable):
     def __init__(self, source_coords: List[Tuple[float, float, float]], 
                  detector_coords: List[Tuple[float, float, float]],
                  radius: float = 1.0):
