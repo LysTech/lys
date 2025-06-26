@@ -12,7 +12,10 @@ def test_eigenmode_creation():
     
     eigenmode = Eigenmode(values, eigenvalue)
     
-    assert eigenmode.values is values
+    # Should behave like a numpy array
+    assert isinstance(eigenmode, np.ndarray)
+    assert isinstance(eigenmode, Eigenmode)
+    np.testing.assert_array_equal(eigenmode, values)
     assert eigenmode.eigenvalue == eigenvalue
     assert len(eigenmode) == 4
 
@@ -27,6 +30,26 @@ def test_eigenmode_indexing():
     assert eigenmode[0] == 1.0
     assert eigenmode[1] == 2.0
     assert eigenmode[-1] == 4.0
+
+
+def test_eigenmode_array_operations():
+    """Test that Eigenmode behaves like a numpy array."""
+    values = np.array([1.0, 2.0, 3.0, 4.0])
+    eigenvalue = 0.5
+    
+    eigenmode = Eigenmode(values, eigenvalue)
+    
+    # Test array operations
+    doubled = eigenmode * 2
+    assert isinstance(doubled, Eigenmode)
+    assert doubled.eigenvalue == eigenvalue  # eigenvalue should be preserved
+    np.testing.assert_array_equal(doubled, np.array([2.0, 4.0, 6.0, 8.0]))
+    
+    # Test slicing
+    sliced = eigenmode[1:3]
+    assert isinstance(sliced, Eigenmode)
+    assert sliced.eigenvalue == eigenvalue  # eigenvalue should be preserved
+    np.testing.assert_array_equal(sliced, np.array([2.0, 3.0]))
 
 
 def test_load_eigenmodes():
@@ -53,9 +76,9 @@ def test_load_eigenmodes():
             assert len(eigenmodes) == 2
             assert eigenmodes[0].eigenvalue == 0.1
             assert eigenmodes[1].eigenvalue == 0.2
-            # Each eigenmode.values should be a 1D array of length N_vertices (3)
-            np.testing.assert_array_equal(eigenmodes[0].values, np.array([1.0, 3.0, 5.0]))
-            np.testing.assert_array_equal(eigenmodes[1].values, np.array([2.0, 4.0, 6.0]))
+            # Each eigenmode should be a 1D array of length N_vertices (3)
+            np.testing.assert_array_equal(eigenmodes[0], np.array([1.0, 3.0, 5.0]))
+            np.testing.assert_array_equal(eigenmodes[1], np.array([2.0, 4.0, 6.0]))
 
 
 def test_load_eigenmodes_assertion_error():

@@ -1,11 +1,10 @@
 import os
 import warnings
 import numpy as np
-from numpy.linalg import eig
 from scipy.io import loadmat
 import vtk
 from vtk.util import numpy_support
-from typing import List, Tuple
+from typing import List
 
 from lys.utils.paths import lys_data_dir
 from lys.objects.segmentation import load_charm_segmentation
@@ -23,8 +22,7 @@ Defines classes related to meshes:
 
 #TODO: 
 # - create our own mesh from a segmentation Volume
-# - what about eigenmodes? shouldn't we be able to do mesh.eigenmodes?
-# - load_unMNI_mesh should just load the mesh from disk if it exists?
+# - load_unMNI_mesh should just load the mesh from disk if it exists? NO: takes 1.65 seconds to load MNI+unMNI, its fast enough!
 
 
 def load_unMNI_mesh(patient: str):
