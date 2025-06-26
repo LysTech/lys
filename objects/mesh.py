@@ -104,6 +104,7 @@ class Mesh:
     def _check_mesh(self):
         """ Check mesh properties:
             - 0-indexing
+            - not an empty mesh
         """
         assert len(self.faces) != 0, "Mesh has no faces"
         min_face_idx = min([min(f) for f in self.faces])

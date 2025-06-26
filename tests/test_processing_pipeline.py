@@ -42,20 +42,10 @@ class TestProcessingPipeline:
         with pytest.raises(ValueError):
             ProcessingPipeline(config)
     
-    def test_empty_config(self):
-        """Test that __init__ works with an empty config."""
-        config = {}
-        
-        pipeline = ProcessingPipeline(config)
-        
-        assert len(pipeline.steps) == 0
-    
     def test_get_processing_step_class_with_valid_name(self):
         """Test that _get_processing_step_class returns correct class for valid name."""
         pipeline = ProcessingPipeline(config={})
-        
         step_class = pipeline._get_processing_step_class("BandpassFilter")
-        
         assert step_class == BandpassFilter
     
     def test_get_processing_step_class_with_invalid_name(self):

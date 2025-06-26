@@ -19,6 +19,7 @@ class Jacobian:
 
     
     def sample_at_vertices(self, vertices: np.ndarray) -> np.ndarray:
+        #TODO: should this return a numpy array or an instance of Jacobian?
         """
         Samples the Jacobian at the given vertices by discretizing coordinates to the nearest integer indices.
 

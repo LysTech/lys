@@ -11,6 +11,8 @@ config = {
     },
 }
 
+#TODO: metadata should store the params! why?
+
 processing_pipeline = ProcessingPipeline(config)
 experiment = processing_pipeline.apply(experiment)
 

@@ -27,6 +27,7 @@ for path in paths:
 #TODO: currently we don't do optodes stuff for BettinaSessionAdapter
 #TODO: implement the Flow2SessionAdapter
 #TODO: generally figure out the optodes thing, see comment in Notion Architecture page
+#TODO: RawSessionProcessor is a PREprocessor so it should be renamed
 
 class RawSessionProcessor:
     def __init__(self, session_path: Path):
