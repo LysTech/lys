@@ -84,7 +84,6 @@ The `/scripts` directory contains example scripts that demonstrate how to use th
 - `processing_demo.py`: Demonstrates a complete experiment processing pipeline including wavelength conversion, hemoglobin reconstruction, scalp effect removal, t-statistics conversion, and eigenmode-based reconstruction with correlation analysis against MRI t-stats
 - `viz_demo.py`: Shows 3D visualization capabilities with meshes and optodes
 
-## Documentation
 
 ### Visualization
 
