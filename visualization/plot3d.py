@@ -178,7 +178,6 @@ class VTKScene:
             print(f"Warning: Could not enable Qt integration: {e}")
             print("You may need to run '%gui qt' manually in Jupyter/IPython")
 
-
     def show(self, size=(800, 600), title="VTK Scene", block=False):
         """Open a Qt window with the scene."""
         # 1 — make sure a Qt application exists *first*

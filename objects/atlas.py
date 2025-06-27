@@ -41,6 +41,7 @@ class Atlas(Plottable):
         self.vtk_volume = None
         self.opacity_tf = None
         self.renderer = None
+        self.current_opacity = 0.5  # Default opacity
         
         # Generate default colors
         self._generate_default_colors()
@@ -108,7 +109,7 @@ class Atlas(Plottable):
             r, g, b = self.colors[label]
             color_tf.AddRGBPoint(label, r, g, b)
             if label in self.visible_labels:
-                self.opacity_tf.AddPoint(label, opacity)
+                self.opacity_tf.AddPoint(label, self.current_opacity)
             else:
                 self.opacity_tf.AddPoint(label, 0)
 
@@ -176,18 +177,14 @@ class Atlas(Plottable):
         colors : dict, optional
             New color mapping for regions {label: (r, g, b)}
         """
-        if opacity is not None:
-            # For volume data, update the opacity transfer function
-            if isinstance(actor, vtk.vtkVolume):
-                volume_property = actor.GetProperty()
-                opacity_tf = volume_property.GetScalarOpacity()
-                # Update opacity for all visible labels
-                for label in self.visible_labels:
-                    opacity_tf.AddPoint(label, opacity)
-                opacity_tf.Modified()
-            else:
-                # For other types of actors
-                actor.GetProperty().SetOpacity(opacity)
+        if opacity is not None and isinstance(actor, vtk.vtkVolume):
+            self.current_opacity = opacity
+            volume_property = actor.GetProperty()
+            opacity_tf = volume_property.GetScalarOpacity()
+            # Update opacity for all visible labels
+            for label in self.visible_labels:
+                opacity_tf.AddPoint(label, opacity)
+            opacity_tf.Modified()
         
 
     def _create_checkbox_actor(self, label: int, x_pos: float, y_pos: float, size: float) -> vtk.vtkActor2D:
@@ -427,7 +424,7 @@ class Atlas(Plottable):
             visible = False
         else:
             # Show the region
-            self.opacity_tf.AddPoint(label, 0.5)
+            self.opacity_tf.AddPoint(label, self.current_opacity)
             self.visible_labels.add(label)
             visible = True
         

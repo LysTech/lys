@@ -3,7 +3,17 @@ from lys.processing.pipeline import ProcessingPipeline
 
 experiment_name = "fnirs_8classes"
 experiment = create_experiment(experiment_name, "nirs")
+experiment = experiment.filter_by_subjects(["P03"])
 
+""" First we check mesh and volume alignmnent """
+from lys.visualization import VTKScene
+mesh = experiment.sessions[0].patient.mesh
+segmentation = experiment.sessions[0].patient.segmentation
+scene = VTKScene()
+# See how our alignment is not perfect!! 
+scene.add(mesh).add(segmentation).format(segmentation, opacity=0.02).show()
+
+""" Now we process the experiment with a few ProcessingSteps """ 
 config = [
     {"ConvertWavelengthsToOD": {}},
     {"ConvertODtoHbOandHbR": {}},

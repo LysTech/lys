@@ -111,7 +111,7 @@ By default we use the full range of the colormap, so if you pass values between 
 
 ```python
 # Update the colormap to any allowed matplotlib colormap (or custom!)
-scene.style(static_data_mesh, cmap="inferno")
+scene.format(static_data_mesh, cmap="inferno")
 ```
 
 **Working with Time-Series Data**
@@ -120,7 +120,7 @@ scene.style(static_data_mesh, cmap="inferno")
 scene = VTKScene()
 scene.add(time_series_mesh)
 scene.show()
-scene.style(time_series_mesh, opacity=0.5, cmap="viridis") #change the opacity and/or cmap
+scene.format(time_series_mesh, opacity=0.5, cmap="viridis") #change the opacity and/or cmap
 ```
 
 StaticDataMesh and TimeSeriesDataMesh styles can be changed with: new opacities, new colormaps.
