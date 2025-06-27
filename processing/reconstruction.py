@@ -3,6 +3,7 @@ from lys.interfaces import ProcessingStep
 from lys.objects import Session
 
 #TODO: docstring for compute_Bmn
+#TODO: hardcode the number of sources and detectors is BAD!!!
 
 class ReconstructionStep(ProcessingStep):
     def __init__(self, num_eigenmodes: int):
@@ -13,6 +14,8 @@ class ReconstructionStep(ProcessingStep):
         eigenmodes = session.patient.mesh.eigenmodes
         tasks = session.protocol.tasks
         vertex_jacobian = session.jacobians[0].sample_at_vertices(session.patient.mesh.vertices)
+        num_sources = 16
+        num_detectors = 24
         Bmn = compute_Bmn(vertex_jacobian,
                         eigenmodes, 
                         num_sources, #where does this come from?

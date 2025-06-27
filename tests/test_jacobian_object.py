@@ -10,34 +10,67 @@ from lys.objects.jacobian import Jacobian, JacobianFactory
 
 def test_jacobian_initialization():
     """Tests that the Jacobian can be initialized correctly."""
-    data = np.random.rand(10, 10, 10)
+    data = np.random.rand(2, 3, 4, 5, 6)  # Shape (S, D, X, Y, Z)
     j = Jacobian(data, wavelength='wl1')
     np.testing.assert_array_equal(j.data, data)
 
 
 def test_sample_at_vertices():
     """Tests the sample_at_vertices method of the Jacobian class."""
-    # Create a simple 3x3x3 jacobian where the value is the sum of indices
-    x, y, z = np.mgrid[0:3, 0:3, 0:3]
-    data = x + y + z
+    # Create a simple 2x2x3x3x3 jacobian where the value is the sum of spatial indices
+    # Shape is (S=2, D=2, X=3, Y=3, Z=3)
+    s, d, x, y, z = np.mgrid[0:2, 0:2, 0:3, 0:3, 0:3]
+    data = x + y + z  # Value depends only on spatial coordinates 
     j = Jacobian(data, wavelength='wl1')
 
     # Test sampling at integer coordinates (on grid points)
     vertices_on_grid = np.array([[0, 0, 0], [1, 1, 1], [2, 2, 2]])
-    expected_on_grid = np.array([0, 3, 6])
+    # Expected shape is (S=2, D=2, N=3) where N is number of vertices
+    # For vertex [0,0,0]: value = 0+0+0 = 0
+    # For vertex [1,1,1]: value = 1+1+1 = 3  
+    # For vertex [2,2,2]: value = 2+2+2 = 6
+    expected_on_grid = np.array([[[0, 3, 6], [0, 3, 6]], [[0, 3, 6], [0, 3, 6]]])
     sampled_on_grid = j.sample_at_vertices(vertices_on_grid)
     np.testing.assert_allclose(sampled_on_grid, expected_on_grid)
+    assert sampled_on_grid.shape == (2, 2, 3)  # (S, D, N)
 
     # Test sampling between grid points (discretization to nearest integer)
     vertices_between_grid = np.array([[0.5, 0.5, 0.5], [1.5, 1.5, 1.5]])
-    expected_between_grid = np.array([0, 6])  # [0.5,0.5,0.5] -> [0, 0, 0] = 3, [1.5,1.5,1.5] -> [2,2,2] = 6
+    # [0.5,0.5,0.5] -> [0, 0, 0] = 0, [1.5,1.5,1.5] -> [2,2,2] = 6
+    expected_between_grid = np.array([[[0, 6], [0, 6]], [[0, 6], [0, 6]]])
     sampled_between_grid = j.sample_at_vertices(vertices_between_grid)
     np.testing.assert_allclose(sampled_between_grid, expected_between_grid)
+    assert sampled_between_grid.shape == (2, 2, 2)  # (S, D, N)
 
     # Test sampling outside the bounds (should raise AssertionError)
     vertices_outside = np.array([[-1, 0, 0], [10, 10, 10]])
     with pytest.raises(AssertionError):
         j.sample_at_vertices(vertices_outside)
+
+
+def test_sample_at_vertices_unsorted():
+    """Tests that sample_at_vertices works with unsorted vertex indices."""
+    s, d, x, y, z = np.mgrid[0:2, 0:2, 0:3, 0:3, 0:3]
+    data = x + y + z  # Value is sum of spatial indices
+    j = Jacobian(data, wavelength='wl1')
+
+    # Unsorted vertices that would fail h5py's monotonicity requirement
+    vertices_unsorted = np.array([[2, 2, 2], [0, 0, 0], [1, 1, 1]])
+    
+    # Expected values: 
+    # vertex [2,2,2]: value = 2+2+2 = 6
+    # vertex [0,0,0]: value = 0+0+0 = 0
+    # vertex [1,1,1]: value = 1+1+1 = 3
+    # The output should be in the same order as the input vertices.
+    expected_values = np.array([6, 0, 3])
+    
+    # Expected shape is (S, D, N) = (2, 2, 3)
+    # The values should be broadcasted across S and D dimensions
+    expected_unsorted = np.broadcast_to(expected_values, (2, 2, 3))
+    
+    sampled_unsorted = j.sample_at_vertices(vertices_unsorted)
+    np.testing.assert_allclose(sampled_unsorted, expected_unsorted)
+    assert sampled_unsorted.shape == (2, 2, 3)
 
 
 def test_load_jacobian_from_mat(tmp_path):

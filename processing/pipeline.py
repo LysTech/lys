@@ -2,6 +2,7 @@ from lys.objects import Experiment
 from lys.processing.steps import ProcessingStep, BandpassFilter
 import importlib
 import inspect
+from tqdm import tqdm
 
 
 class ProcessingPipeline:
@@ -40,7 +41,7 @@ class ProcessingPipeline:
         Args:
             experiment: The experiment to process
         """
-        for session in experiment.sessions:
+        for session in tqdm(experiment.sessions, desc="Processing sessions"):
             for step in self.steps:
                 step.process(session)
         return experiment
