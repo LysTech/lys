@@ -11,12 +11,12 @@ class TestProcessingPipeline:
     
     def test_init_with_bandpass_filter(self):
         """Test that __init__ correctly instantiates a BandpassFilter."""
-        config = {
-            "BandpassFilter": {
+        config = [
+            {"BandpassFilter": {
                 "lower_bound": 0.01,
                 "upper_bound": 0.1,
-            },
-        }
+            }},
+        ]
         
         pipeline = ProcessingPipeline(config)
         
@@ -33,11 +33,11 @@ class TestProcessingPipeline:
     
     def test_init_with_unknown_step(self):
         """Test that __init__ raises an error for unknown steps."""
-        config = {
-            "UnknownStep": {
+        config = [
+            {"UnknownStep": {
                 "param": "value",
-            },
-        }
+            }},
+        ]
         
         with pytest.raises(ValueError):
             ProcessingPipeline(config)
@@ -112,12 +112,12 @@ class TestProcessingPipeline:
             np.testing.assert_array_equal(session2.processed_data[key], session2.raw_data[key])
         
         # Create pipeline with BandpassFilter
-        config = {
-            "BandpassFilter": {
+        config = [
+            {"BandpassFilter": {
                 "lower_bound": 0.01,
                 "upper_bound": 0.1,
-            },
-        }
+            }},
+        ]
         pipeline = ProcessingPipeline(config)
         
         # Apply the pipeline

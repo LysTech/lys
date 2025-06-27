@@ -3,36 +3,43 @@ from lys.processing.steps import ProcessingStep, BandpassFilter
 import importlib
 import inspect
 from tqdm import tqdm
-
+from typing import List, Dict, Any
 
 class ProcessingPipeline:
     """
     A pipeline that applies a sequence of processing steps to experiments.
     
-    The pipeline is configured from a dictionary that specifies which processing
-    steps to apply and their parameters.
+    The pipeline is configured from a list that specifies which processing
+    steps to apply and their parameters in order.
     """
     
-    def __init__(self, config: dict):
+    def __init__(self, config: List[Dict[str, Any]]):
         """
         Initialize the processing pipeline with a configuration.
         
         Args:
-            config: Dictionary mapping step class names to parameter dictionaries.
+            config: List of dictionaries, each mapping step class names to parameter dictionaries.
                    If None, creates an empty pipeline.
                    
         Example:
-            config = {
-                "BandpassFilter": {
-                    "lower_bound": 0.01,
-                    "upper_bound": 0.1,
+            config = [
+                {
+                    "BandpassFilter": {
+                        "lower_bound": 0.01,
+                        "upper_bound": 0.1,
+                    },
                 },
-            }
+                {
+                    "AnotherStep": {
+                        "param": "value",
+                    },
+                },
+            ]
         """
         self.steps = []
         
         if config is not None:
-            self._configure_from_dict(config)
+            self._configure_from_list(config)
     
     def apply(self, experiment: Experiment):
         """
@@ -46,19 +53,20 @@ class ProcessingPipeline:
                 step.process(session)
         return experiment
 
-    def _configure_from_dict(self, config: dict) -> None:
+    def _configure_from_list(self, config: List[Dict[str, Any]]) -> None:
         """
-        Configure the pipeline from a dictionary specification.
+        Configure the pipeline from a list specification.
         
         Args:
-            config: Dictionary mapping step class names to parameter dictionaries
+            config: List of dictionaries, each mapping step class names to parameter dictionaries
         """
         self.steps = []
         
-        for step_name, step_params in config.items():
-            step_class = self._get_processing_step_class(step_name)
-            step_instance = step_class(**step_params)
-            self.steps.append(step_instance)
+        for step_config in config:
+            for step_name, step_params in step_config.items():
+                step_class = self._get_processing_step_class(step_name)
+                step_instance = step_class(**step_params)
+                self.steps.append(step_instance)
     
     def _get_processing_step_class(self, step_name: str):
         """
