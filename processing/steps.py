@@ -26,7 +26,7 @@ num_detectors = 24
 #num sources: 16, num detectors: 24
 
 
-class ReconstructEigenmodes(ProcessingStep):
+class ReconstructWithEigenmodes(ProcessingStep):
     def __init__(self, num_eigenmodes: int, regularisation_param: float = 0.01):
         self.num_eigenmodes = num_eigenmodes
         self.regularisation_param = regularisation_param
@@ -45,19 +45,25 @@ class ReconstructEigenmodes(ProcessingStep):
         # we want the reconstructed t-stat maps for each task, both HbO and HbR
         
         # Initialize the reconstructed data dictionaries
-        n_tasks = session.processed_data["t_HbO"].shape[1]
+        t_HbO_data = session.processed_data["t_HbO"]
+        t_HbR_data = session.processed_data["t_HbR"]
         session.processed_data["t_HbO_reconstructed"] = {}
         session.processed_data["t_HbR_reconstructed"] = {}
         
         # Reconstruct for each task
-        for task_idx in range(n_tasks):
-            session.processed_data["t_HbO_reconstructed"][task_idx] = self.reconstruct(Bmn, session.processed_data["t_HbO"][:, task_idx], phi, eigenvals)
-            session.processed_data["t_HbR_reconstructed"][task_idx] = self.reconstruct(Bmn, session.processed_data["t_HbR"][:, task_idx], phi, eigenvals)
+        for task_name, t_values in t_HbO_data.items():
+            session.processed_data["t_HbO_reconstructed"][task_name] = self.reconstruct(
+                Bmn, t_values, phi, eigenvals
+            )
+        
+        for task_name, t_values in t_HbR_data.items():
+            session.processed_data["t_HbR_reconstructed"][task_name] = self.reconstruct(
+                Bmn, t_values, phi, eigenvals
+            )
         
         # Clean up intermediate data
         del session.processed_data["t_HbO"]
         del session.processed_data["t_HbR"]
-
 
     def reconstruct(self, Bmn, y_m, phi, eigenvals):
         L = np.diag(self.regularisation_param * eigenvals)
@@ -134,7 +140,7 @@ class ConvertToTStats(ProcessingStep):
         del session.processed_data["HbO"]
         del session.processed_data["HbR"]
 
-    def _get_t_stats(self, HbO: np.ndarray, HbR: np.ndarray, protocol) -> tuple[np.ndarray, np.ndarray]:
+    def _get_t_stats(self, HbO: np.ndarray, HbR: np.ndarray, protocol) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
         """
         Compute t-statistics for HbO and HbR data using GLM analysis.
         
@@ -144,16 +150,17 @@ class ConvertToTStats(ProcessingStep):
             protocol: Protocol object containing timing information
             
         Returns:
-            Tuple of (t_HbO, t_HbR) t-statistics arrays, each with shape (n_channels, n_conditions)
+            A tuple of two dictionaries, one for t_HbO and one for t_HbR.
+            Each dictionary maps a condition name to a numpy array of t-statistics 
+            with shape (n_channels,).
         """
         T, n_channels = HbO.shape  # n_channels = S*D
         # 1) Build the same design matrix X that you used in GLM
-        X = self._create_design_matrix(protocol, fs, T)
-        n_conditions = X.shape[1]
+        X, conditions = self._create_design_matrix(protocol, fs, T)
         
         # Initialize outputs
-        t_HbO = np.zeros((n_channels, n_conditions))
-        t_HbR = np.zeros((n_channels, n_conditions))
+        t_HbO_array = np.zeros((n_channels, len(conditions)))
+        t_HbR_array = np.zeros((n_channels, len(conditions)))
         
         # 2) For each channel, run AR(1)+IRLS and compute t-stats
         for ch in range(n_channels):
@@ -161,20 +168,23 @@ class ConvertToTStats(ProcessingStep):
             y_r = HbR[:, ch]
             
             # Fit and get (beta, tvals) for oxy
-            beta_o, tvals_o = self._glm_single_channel_tstats(
+            _beta_o, tvals_o = self._glm_single_channel_tstats(
                 y_o, X, max_iter=self.max_iter, tol=self.tol
             )
-            t_HbO[ch, :] = tvals_o
+            t_HbO_array[ch, :] = tvals_o
             
             # Fit and get (beta, tvals) for deoxy
-            beta_r, tvals_r = self._glm_single_channel_tstats(
+            _beta_r, tvals_r = self._glm_single_channel_tstats(
                 y_r, X, max_iter=self.max_iter, tol=self.tol
             )
-            t_HbR[ch, :] = tvals_r
-        
+            t_HbR_array[ch, :] = tvals_r
+
+        t_HbO = {condition: t_HbO_array[:, i] for i, condition in enumerate(conditions)}
+        t_HbR = {condition: t_HbR_array[:, i] for i, condition in enumerate(conditions)}
+
         return t_HbO, t_HbR
 
-    def _create_design_matrix(self, protocol, fs: float, n_time_points: int) -> np.ndarray:
+    def _create_design_matrix(self, protocol, fs: float, n_time_points: int) -> tuple[np.ndarray, list[str]]:
         """
         Create a design matrix for GLM analysis based on the protocol.
         
@@ -184,10 +194,12 @@ class ConvertToTStats(ProcessingStep):
             n_time_points: Number of time points in the data
             
         Returns:
-            Design matrix with shape (n_time_points, n_conditions)
+            A tuple containing:
+            - Design matrix with shape (n_time_points, n_conditions)
+            - A list of condition names.
         """
         # Get unique task conditions
-        conditions = list(protocol.tasks)
+        conditions = sorted(list(protocol.tasks))
         n_conditions = len(conditions)
         
         # Initialize design matrix
@@ -216,7 +228,7 @@ class ConvertToTStats(ProcessingStep):
                 if start_idx < end_idx:
                     X[start_idx:end_idx, i] = 1.0
         
-        return X
+        return X, conditions
 
     def _glm_single_channel_tstats(self, y: np.ndarray, X: np.ndarray, max_iter: int = 20, tol: float = 1e-2) -> tuple[np.ndarray, np.ndarray]:
         """

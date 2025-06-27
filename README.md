@@ -97,8 +97,11 @@ from lys.visualization.plot3d import VTKScene
 mesh = from_mat("/path/to/mesh.mat")
 
 # Create and show the visualization
-scene = VTKScene()
-scene.add(mesh).show()
+# A title can be provided to the scene on creation...
+scene = VTKScene(title="My Awesome Scene")
+scene.add(mesh)
+# ...or when showing it.
+scene.show(title="A New Title!")
 scene.remove(mesh)
 
 # If you want data on the mesh, e.g. t-stats
@@ -117,7 +120,7 @@ scene.format(static_data_mesh, cmap="inferno")
 **Working with Time-Series Data**
 
 ```python
-scene = VTKScene()
+scene = VTKScene(title="Time-Series Animation")
 scene.add(time_series_mesh)
 scene.show()
 scene.format(time_series_mesh, opacity=0.5, cmap="viridis") #change the opacity and/or cmap

@@ -20,7 +20,7 @@ class _Handle:
 
 class VTKScene:
     
-    def __init__(self):
+    def __init__(self, title: str = "VTK Scene"):
         # Core renderer and bookkeeping
         self._ren = vtk.vtkRenderer()
         self._ren.SetBackground(0.1, 0.1, 0.1)  # dark gray
@@ -35,6 +35,7 @@ class VTKScene:
         # Qt / VTK windowing bits – created lazily in ``show``
         self._qt_app: Optional[QtWidgets.QApplication] = None
         self._qt_window: Optional[_SceneWindow] = None
+        self._title = title
     
     def _create_timeseries_slider(self, parent=None) -> QtWidgets.QSlider:
         """Create a time series slider widget."""
@@ -178,18 +179,19 @@ class VTKScene:
             print(f"Warning: Could not enable Qt integration: {e}")
             print("You may need to run '%gui qt' manually in Jupyter/IPython")
 
-    def show(self, size=(800, 600), title="VTK Scene", block=False):
+    def show(self, size=(800, 600), title: Optional[str] = None, block=False):
         """Open a Qt window with the scene."""
         # 1 — make sure a Qt application exists *first*
         self._enable_qt_integration()     # Jupyter "%gui qt5", optional
         self._ensure_qt_app()             # creates / fetches QApplication
 
         # 2 — create (or reuse) the main window **after** QApplication
+        window_title = title if title is not None else self._title
         if self._qt_window is None:
-            self._qt_window = _SceneWindow(self, size, title)
+            self._qt_window = _SceneWindow(self, size, window_title)
         else:
             self._qt_window.resize(*size)
-            self._qt_window.setWindowTitle(title)
+            self._qt_window.setWindowTitle(window_title)
 
         # 3 — hand the ready‑made interactor to objects that asked for it
         for obj in self._need_interaction:
