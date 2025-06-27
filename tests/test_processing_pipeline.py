@@ -27,7 +27,7 @@ class TestProcessingPipeline:
     
     def test_init_without_config(self):
         """Test that __init__ works without a config."""
-        pipeline = ProcessingPipeline(config={})
+        pipeline = ProcessingPipeline(config=[])
         
         assert len(pipeline.steps) == 0
     
@@ -44,20 +44,20 @@ class TestProcessingPipeline:
     
     def test_get_processing_step_class_with_valid_name(self):
         """Test that _get_processing_step_class returns correct class for valid name."""
-        pipeline = ProcessingPipeline(config={})
+        pipeline = ProcessingPipeline(config=[])
         step_class = pipeline._get_processing_step_class("BandpassFilter")
         assert step_class == BandpassFilter
     
     def test_get_processing_step_class_with_invalid_name(self):
         """Test that _get_processing_step_class raises error for invalid name."""
-        pipeline = ProcessingPipeline(config={})
+        pipeline = ProcessingPipeline(config=[])
         
         with pytest.raises(ValueError):
             pipeline._get_processing_step_class("InvalidStep")
     
     def test_get_processing_step_class_ignores_abstract_base_class(self):
         """Test that _get_processing_step_class ignores the abstract base class."""
-        pipeline = ProcessingPipeline(config={})
+        pipeline = ProcessingPipeline(config=[])
         
         # This should not find ProcessingStep itself, only concrete subclasses
         with pytest.raises(ValueError):
@@ -139,4 +139,58 @@ class TestProcessingPipeline:
         assert len(session1.metadata["processing_steps"]) == 1
         assert len(session2.metadata["processing_steps"]) == 1
         assert session1.metadata["processing_steps"][0]["step_name"] == "BandpassFilter"
-        assert session2.metadata["processing_steps"][0]["step_name"] == "BandpassFilter" 
+        assert session2.metadata["processing_steps"][0]["step_name"] == "BandpassFilter"
+
+    def test_apply_records_step_parameters_in_metadata(self):
+        """Test that apply() correctly records step parameters in metadata."""
+        # Create simple test data
+        raw_data = {
+            "wl1": np.random.randn(100, 10),
+            "wl2": np.random.randn(100, 10)
+        }
+        
+        # Create minimal Patient and Protocol objects
+        from lys.objects.atlas import Atlas
+        from lys.objects.mesh import Mesh
+        
+        # Create mock Atlas and Mesh for Patient
+        mock_atlas = Mock(spec=Atlas)
+        mock_mesh = Mock(spec=Mesh)
+        patient = Patient(name="P01", segmentation=mock_atlas, mesh=mock_mesh)
+        
+        # Create minimal Protocol
+        protocol = Protocol(intervals=[])
+        
+        session = Session(
+            patient=patient,
+            protocol=protocol,
+            raw_data=raw_data
+        )
+        
+        experiment = Experiment(
+            name="test_experiment",
+            scanner="test_scanner",
+            sessions=[session]
+        )
+        
+        # Create pipeline with BandpassFilter
+        config = [
+            {"BandpassFilter": {
+                "lower_bound": 0.01,
+                "upper_bound": 0.1,
+            }},
+        ]
+        pipeline = ProcessingPipeline(config)
+        
+        # Apply the pipeline
+        pipeline.apply(experiment)
+        
+        # Verify that processing metadata was recorded with parameters
+        assert "processing_steps" in session.metadata
+        assert len(session.metadata["processing_steps"]) == 1
+        step_info = session.metadata["processing_steps"][0]
+        assert step_info["step_name"] == "BandpassFilter"
+        assert "lower_bound" in step_info
+        assert step_info["lower_bound"] == 0.01
+        assert "upper_bound" in step_info
+        assert step_info["upper_bound"] == 0.1 

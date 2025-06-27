@@ -57,10 +57,13 @@ class ProcessingStep(ABC):
         if 'processing_steps' not in session.metadata:
             session.metadata['processing_steps'] = []
         
+        step_params = vars(self).copy()
+        step_params.update(kwargs)
+        
         step_info = {
             'step_name': str(self),
             'timestamp': np.datetime64('now'),
-            **kwargs
+            **step_params
         }
         session.metadata['processing_steps'].append(step_info)
     
