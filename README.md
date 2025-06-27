@@ -14,6 +14,7 @@ TODO:
 - [Preprocessing](#preprocessing)
 - [Patient Class](#patient-class)
 - [Jacobian](#jacobian)
+- [Eigenmodes](#eigenmodes)
 - [Data Directory Setup](#data-directory-setup)
 - [Data Folder Structure](#data-folder-structure)
 
@@ -30,12 +31,12 @@ experiment_name = "fnirs_8classes" #this needs to be an actual folder on your fi
 experiment = create_experiment(experiment_name, "nirs")
 
 # Configure processing steps: these must be defined in processing/steps.py
-config = {
-    "BandpassFilter": {
+config = [
+    {"BandpassFilter": {
         "upper_bound": 0.1,
         "lower_bound": 0.01,
-    },
-}
+    }},
+]
 
 # Apply the processing pipeline
 processing_pipeline = ProcessingPipeline(config)
@@ -48,6 +49,7 @@ experiment = processing_pipeline.apply(experiment)
 lys/
 ├── objects/
 │   ├── atlas.py
+│   ├── eigenmodes.py
 │   ├── jacobian.py
 │   ├── mesh.py
 │   ├── optodes.py
@@ -66,6 +68,7 @@ lys/
 │   └── viz_demo.py
 ├── utils/
 │   ├── coordinates.py
+│   ├── mri_tstat.py
 │   ├── paths.py   
 │   └── strings.py
 ├── visualization/
@@ -78,7 +81,7 @@ lys/
 
 The `/scripts` directory contains example scripts that demonstrate how to use the Lys library. This separation of concerns keeps the core library code (in `/objects`, `/visualization`, and `/utils`) stable and reusable, while allowing experimentation and result generation to happen in dedicated script files. The scripts include:
 
-- `processing_demo.py`: Demonstrates experiment processing with bandpass filtering
+- `processing_demo.py`: Demonstrates a complete experiment processing pipeline including wavelength conversion, hemoglobin reconstruction, scalp effect removal, t-statistics conversion, and eigenmode-based reconstruction with correlation analysis against MRI t-stats
 - `viz_demo.py`: Shows 3D visualization capabilities with meshes and optodes
 
 ## Documentation
@@ -280,7 +283,7 @@ wl2_jacobian = next(j for j in jacobians if j.wavelength == 'wl2')
 # Sample values at specific 3D coordinates
 vertices = np.array([[10, 20, 30], [40, 50, 60]])
 sampled_values = wl1_jacobian.sample_at_vertices(vertices)
-print(sampled_values)
+print(sampled_values.shape)  # (S, D, N) where S=sources, D=detectors, N=vertices
 
 # Get a slice of the data (loads into memory)
 data_slice = wl1_jacobian.get_slice((0, :, :, :, :))
@@ -310,8 +313,51 @@ Currently supports MATLAB `.mat` files containing HDF5 datasets. The system is d
 **Notes:**
 
 - Coordinates for `sample_at_vertices()` should be in the index space of the Jacobian data (0 to shape-1 for each axis)
+- The method automatically discretizes coordinates to nearest integer indices using `np.rint()`
 - The system automatically extracts wavelength information from filenames (looks for 'wl1' or 'wl2' in the path)
 - No data transposition is performed during loading; orientation corrections should be handled when accessing the data
+
+### Eigenmodes
+
+The eigenmodes module provides functionality for loading and working with brain eigenmodes from MATLAB files. Eigenmodes are mathematical representations of brain connectivity patterns that can be used for signal reconstruction and analysis.
+
+**How to Load Eigenmodes:**
+
+```python
+from lys.objects.eigenmodes import load_eigenmodes
+
+# Load eigenmodes for a specific patient
+patient_name = "P03"
+eigenmodes = load_eigenmodes(patient_name)
+
+# Access individual eigenmodes
+first_eigenmode = eigenmodes[0]
+print(f"Eigenvalue: {first_eigenmode.eigenvalue}")
+print(f"Eigenmode values shape: {first_eigenmode.shape}")  # (N_vertices,)
+```
+
+**File Location and Naming Convention:**
+
+Eigenmode files are expected to be located in the patient's anatomy directory with a specific naming pattern:
+
+```
+{patient}/anat/meshes/{patient}_EIGMOD_MPR_IIHC_MNI_WM_LH_edited_again_RECOSM_unMNI_D32k_eigenmodes.mat
+```
+
+For example, for patient "P03", the file would be:
+```
+P03/anat/meshes/P03_EIGMOD_MPR_IIHC_MNI_WM_LH_edited_again_RECOSM_unMNI_D32k_eigenmodes.mat
+```
+
+**Data Structure:**
+
+The MATLAB file should contain:
+- `eigenmodes`: A 2D array where each column represents one eigenmode (shape: N_vertices × N_eigenmodes)
+- `eigenvalues`: A 1D array containing the corresponding eigenvalues (shape: N_eigenmodes)
+
+**Eigenmode Objects:**
+
+Each eigenmode is represented as an `Eigenmode` object, which is a subclass of `np.ndarray` with an additional `eigenvalue` attribute. This allows you to work with eigenmode values as regular numpy arrays while maintaining access to the associated eigenvalue.
 
 ## Data Folder Structure
 
