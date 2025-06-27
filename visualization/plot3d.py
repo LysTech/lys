@@ -110,7 +110,7 @@ class VTKScene:
         self.render()
         return self
     
-    def style(self, obj: Any, **updates) -> "VTKScene":
+    def format(self, obj: Any, **updates) -> "VTKScene":
         """Update styling for any object that implements the Plottable interface."""
         if not isinstance(obj, Plottable):
             raise TypeError(f"Object {type(obj).__name__} must implement the Plottable interface")
