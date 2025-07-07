@@ -22,7 +22,7 @@ TODO:
 
 We have some demo scripts in `/scripts`, here we discuss them a bit.
 
-### Processing 
+### Processing Demo
 
 Here's a simple example of how to use Lys to process an experiment. First we have to load it:
 
@@ -44,9 +44,9 @@ scene = VTKScene(title="Mesh and segmentation alignment")
 scene.add(mesh).add(segmentation).format(segmentation, opacity=0.02).show()
 ```
 
-Notice the use of `.format()`, this is a general method for styling (see the `Visualization` section of this documentation for details) which we use here to reduce the opacity of the segmentation so that the mesh is visible underneath.
+Notice the use of `.format()`, this is a general method for styling (see the [Visualization](#visualization) section of this documentation for details) which we use here to reduce the opacity of the segmentation so that the mesh is visible underneath.
 
-Then you may want to do some processing. In this codebase we distinguish pre-processing from processing in the following manner: pre-processing means turning raw files (e.g. `.snirf`) into numpy arrays, and processing means stuff like bandpass filtering. We consider reconstruction a form of reconstruction.
+Then you may want to do some processing. In this codebase we distinguish pre-processing from processing in the following manner: pre-processing means turning raw files (e.g. `.snirf`) into numpy arrays, and processing means stuff like bandpass filtering. We consider reconstruction a form of processing.
 
 ```python
 config = [
@@ -62,11 +62,13 @@ processing_pipeline = ProcessingPipeline(config)
 experiment = processing_pipeline.apply(experiment)
 ```
 
-What `processing_pipeline.apply()` does is for each session, it loops through each processing step in the order they're listed, and applies that step's `.process()` method to the session's `processed_data` attribute. 
+What `processing_pipeline.apply()` does is for each session, it loops through each processing step in the order they're listed, and applies that step's `.process()` method to the session's `processed_data` attribute. Each `ProcessingStep` has keyword arguments, these are specified as above for `ReconstructWithEigenmodes`.
 
 
-
-
+## Notes on Project Architecture
+- We keep abstract classes in `/interfaces`, this is good for readability / future users of the code to easily find concepts.
+- We have many "domain objects", like a mesh, an optode, a session etc. These are kept in `/objects` for the same reason as above.
+- 
 
 ## Scripts
 
