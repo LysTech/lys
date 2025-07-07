@@ -76,7 +76,7 @@ The `/examples` directory contains example scripts that demonstrate how to use t
 - `viz_demo.py`: Shows 3D visualization capabilities with meshes and optodes
 
 
-### Visualization
+## Visualization
 
 The idea is to respect the Open-Closed principle + have composability. Whenever we define a new object that we want to be able to plot, it just needs to have a `to_vtk` method that returns a vtkActor and the `VTKScene` class can plot it. 
 
@@ -145,7 +145,7 @@ StaticDataMesh and TimeSeriesDataMesh styles can be changed with: new opacities,
 
 To ensure that visualization outputs remain consistent over time, Lys uses **snapshot tests**. These tests render objects (such as meshes, atlases, and optodes), save a reference image (snapshot) on the first run, and compare future renders pixel-by-pixel against this snapshot. If a rendering changes unexpectedly, the test will fail, helping to catch regressions or unintended changes in visualization. You can find these tests in `tests/test_plot3d_snapshot.py` and the reference images in `tests/snapshots/`.
 
-### Preprocessing
+## Preprocessing
 
 The preprocessing module is responsible for converting raw data files from various device-specific formats into standardized `.npz` files that can be efficiently loaded for further processing. This is distinct from processing, which handles operations like bandpass filtering and other signal processing tasks.
 
