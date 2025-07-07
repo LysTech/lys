@@ -6,6 +6,7 @@ from lys.processing.pipeline import ProcessingPipeline
 experiment_name = "fnirs_8classes"
 experiment = create_experiment(experiment_name, "nirs")
 experiment = experiment.filter_by_subjects(["P03"])
+experiment.sessions = experiment.sessions[:1]
 
 """ First we check mesh and volume alignmnent """
 from lys.visualization import VTKScene
@@ -30,8 +31,6 @@ processing_pipeline = ProcessingPipeline(config)
 experiment = processing_pipeline.apply(experiment)
 
 
-""" Now we do plots + correlations to check stuff! """
-#TODO: i think this mri_tstats file is bad architecture! Where should MRI tstats live?
 from lys.utils.mri_tstat import get_mri_tstats 
 for session in experiment.sessions:
     for task in session.protocol.tasks:
