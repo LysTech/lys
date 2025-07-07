@@ -18,64 +18,55 @@ TODO:
 - [Data Directory Setup](#data-directory-setup)
 - [Data Folder Structure](#data-folder-structure)
 
-## Quick Start Demo
+## Demo Usage
 
-Here's a simple example of how to use Lys to process an experiment with bandpass filtering:
+We have some demo scripts in `/scripts`, here we discuss them a bit.
+
+### Processing 
+
+Here's a simple example of how to use Lys to process an experiment. First we have to load it:
 
 ```python
 from lys.objects.experiment import create_experiment
-from lys.processing.pipeline import ProcessingPipeline
-
-# Create an experiment
-experiment_name = "fnirs_8classes" #this needs to be an actual folder on your file system
+experiment_name = "fnirs_8classes"
 experiment = create_experiment(experiment_name, "nirs")
+experiment = experiment.filter_by_subjects(["P03"])
+```
 
-# Configure processing steps: these must be defined in processing/steps.py
+An experiment is a list of sessions, `create_experiment` finds the folder in your file structure called "fnirs_8classes" and constructs an `Experiment` object. It can be filtered by subject. Once you've loaded an experiment, you may want to check that your meshes and volumes are aligned. Below we do that for the first session (different sessions may have different patients):
+
+```python
+from lys.visualization import VTKScene
+mesh = experiment.sessions[0].patient.mesh
+segmentation = experiment.sessions[0].patient.segmentation
+scene = VTKScene(title="Mesh and segmentation alignment")
+# See how our alignment is not perfect :( !! 
+scene.add(mesh).add(segmentation).format(segmentation, opacity=0.02).show()
+```
+
+Notice the use of `.format()`, this is a general method for styling (see the `Visualization` section of this documentation for details) which we use here to reduce the opacity of the segmentation so that the mesh is visible underneath.
+
+Then you may want to do some processing. In this codebase we distinguish pre-processing from processing in the following manner: pre-processing means turning raw files (e.g. `.snirf`) into numpy arrays, and processing means stuff like bandpass filtering. We consider reconstruction a form of reconstruction.
+
+```python
 config = [
-    {"BandpassFilter": {
-        "upper_bound": 0.1,
-        "lower_bound": 0.01,
-    }},
+    {"ConvertWavelengthsToOD": {}},
+    {"ConvertODtoHbOandHbR": {}},
+    {"RemoveScalpEffect": {}},
+    {"ConvertToTStats": {}}, 
+    {"ReconstructWithEigenmodes": {"num_eigenmodes": 200,
+                                   "regularisation_param": 0.01}}
 ]
 
-# Apply the processing pipeline
 processing_pipeline = ProcessingPipeline(config)
 experiment = processing_pipeline.apply(experiment)
 ```
 
-## Project Structure
+What `processing_pipeline.apply()` does is for each session, it loops through each processing step in the order they're listed, and applies that step's `.process()` method to the session's `processed_data` attribute. 
 
-```
-lys/
-├── objects/
-│   ├── atlas.py
-│   ├── eigenmodes.py
-│   ├── jacobian.py
-│   ├── mesh.py
-│   ├── optodes.py
-│   ├── patient.py
-│   ├── protocol.py
-│   ├── segmentation.py
-│   ├── session.py
-│   ├── volume.py
-│   └── __init__.py
-├── processing/
-│   ├── pipeline.py
-│   ├── preprocessing.py
-│   └── steps.py
-├── scripts/
-│   ├── processing_demo.py
-│   └── viz_demo.py
-├── utils/
-│   ├── coordinates.py
-│   ├── mri_tstat.py
-│   ├── paths.py   
-│   └── strings.py
-├── visualization/
-│   ├── plot3d.py 
-│   └── utils.py
-└── tests/  
-```
+
+
+
 
 ## Scripts
 
