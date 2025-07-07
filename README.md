@@ -7,9 +7,7 @@ TODO:
 
 ## Table of Contents
 
-- [Project Structure](#project-structure)
-- [Scripts](#scripts)
-- [Documentation](#documentation)
+- [Demo Usage](#demo-usage)
 - [Visualization](#visualization)
 - [Preprocessing](#preprocessing)
 - [Patient Class](#patient-class)
@@ -44,7 +42,7 @@ scene = VTKScene(title="Mesh and segmentation alignment")
 scene.add(mesh).add(segmentation).format(segmentation, opacity=0.02).show()
 ```
 
-Notice the use of `.format()`, this is a general method for styling (see the [Visualization](#visualization) section of this documentation for details) which we use here to reduce the opacity of the segmentation so that the mesh is visible underneath.
+Notice the use of `.format()`, this is a general method for styling (see [Visualization](#visualization) for details) which we use here to reduce the opacity of the segmentation so that the mesh is visible underneath.
 
 Then you may want to do some processing. In this codebase we distinguish pre-processing from processing in the following manner: pre-processing means turning raw files (e.g. `.snirf`) into numpy arrays, and processing means stuff like bandpass filtering. We consider reconstruction a form of processing.
 
@@ -68,11 +66,11 @@ What `processing_pipeline.apply()` does is for each session, it loops through ea
 ## Notes on Project Architecture
 - We keep abstract classes in `/interfaces`, this is good for readability / future users of the code to easily find concepts.
 - We have many "domain objects", like a mesh, an optode, a session etc. These are kept in `/objects` for the same reason as above.
-- 
+- We want to treat this as a library, like our internal numpy, and then use the tool for our work. Not sure if this should be a separate repo, or just go in `/exa,ples`.
 
-## Scripts
+## Examples folder
 
-The `/scripts` directory contains example scripts that demonstrate how to use the Lys library. This separation of concerns keeps the core library code (in `/objects`, `/visualization`, and `/utils`) stable and reusable, while allowing experimentation and result generation to happen in dedicated script files. The scripts include:
+The `/examples` directory contains example scripts that demonstrate how to use the Lys library. This separation of concerns keeps the core library code (in `/objects`, `/visualization`, and `/utils`) stable and reusable, while allowing experimentation and result generation to happen in dedicated script files. The scripts include:
 
 - `processing_demo.py`: Demonstrates a complete experiment processing pipeline including wavelength conversion, hemoglobin reconstruction, scalp effect removal, t-statistics conversion, and eigenmode-based reconstruction with correlation analysis against MRI t-stats
 - `viz_demo.py`: Shows 3D visualization capabilities with meshes and optodes
