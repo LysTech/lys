@@ -141,6 +141,21 @@ StaticDataMesh and TimeSeriesDataMesh styles can be changed with: new opacities,
 - For `StaticMeshData`, you can update opacity and colormap.
 - For `TimeSeriesMeshData`, you can update opacity and colormap (applies to the current timepoint's data).
 
+
+** Channel Plots ** 
+
+See `examples/channelplot_demo.py` for an example you can run.
+
+```python
+from lys.visualization import ChannelsPlot
+data = experiment.sessions[0].raw_data["wl1"]
+plot = ChannelsPlot()
+plot.plot(data.T) # expects shape: num channels x num timepoints
+```
+
+![Channel Plots visualization example](assets/channelplot_all.png)
+![example 2](assets/channelplot_single.png)
+
 **Snapshot Testing for Visualization**
 
 To ensure that visualization outputs remain consistent over time, Lys uses **snapshot tests**. These tests render objects (such as meshes, atlases, and optodes), save a reference image (snapshot) on the first run, and compare future renders pixel-by-pixel against this snapshot. If a rendering changes unexpectedly, the test will fail, helping to catch regressions or unintended changes in visualization. You can find these tests in `tests/test_plot3d_snapshot.py` and the reference images in `tests/snapshots/`.

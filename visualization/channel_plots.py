@@ -4,6 +4,7 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
 from PyQt5.QtCore import Qt  # type: ignore
 from typing import Optional
 import sys
+from tqdm import tqdm
 
 
 class ChannelsPlot:
@@ -118,7 +119,7 @@ class ChannelsPlot:
         
         # Create individual plot widgets for all channels
         self.plot_widgets = []
-        for i in range(num_channels):
+        for i in tqdm(range(num_channels)):
             # Create plot widget
             plot_widget = pg.PlotWidget()
             plot_widget.setBackground(None)
