@@ -142,7 +142,7 @@ StaticDataMesh and TimeSeriesDataMesh styles can be changed with: new opacities,
 - For `TimeSeriesMeshData`, you can update opacity and colormap (applies to the current timepoint's data).
 
 
-** Channel Plots ** 
+**Channel Plots** 
 
 See `examples/channelplot_demo.py` for an example you can run.
 
