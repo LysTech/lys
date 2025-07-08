@@ -13,15 +13,15 @@ class ReconstructionStep(ProcessingStep):
         """ this modifies session.processed_data inplace """
         eigenmodes = session.patient.mesh.eigenmodes
         tasks = session.protocol.tasks
-        vertex_jacobian = session.jacobians[0].sample_at_vertices(session.patient.mesh.vertices)
+        vertex_jacobian_wl1 = session.jacobians[0].sample_at_vertices(session.patient.mesh.vertices)
         num_sources = 16
         num_detectors = 24
-        Bmn = compute_Bmn(vertex_jacobian,
+        Bmn_wl1 = compute_Bmn(vertex_jacobian_wl1,
                         eigenmodes, 
-                        num_sources, #where does this come from?
-                        num_detectors, #where does this come from?
+                        num_sources, #TODO: where does this come from?
+                        num_detectors, #TODO: where does this come from?
                         self.num_eigenmodes)
-        reconstructed = reconstruct(Bmn, session.processed_data["wl1"], eigenmodes, 0.01)
+        reconstructed = reconstruct(Bmn_wl1, session.processed_data["wl1"], eigenmodes, 0.01)
         session.processed_data = reconstructed
 
 

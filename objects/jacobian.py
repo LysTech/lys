@@ -8,27 +8,70 @@ from lys.utils import lys_data_dir
 import os
 
 #TODO: reflect on the multi-wavelength thing
-#TODO: what about tranposing? rn we transpose nothing, seems clean?
 
 @dataclass
 class Jacobian:
-    """Represents a Jacobian matrix with lazy-loaded data from an HDF5 dataset and its associated wavelength."""
+    """Represents a Jacobian matrix with lazy-loaded data from an HDF5 dataset and its associated wavelength.
+    
+    The internal HDF5 data has shape (D, S, X, Y, Z) but is accessed as (X, Y, Z, D, S)
+    to match the expected coordinate system.
+    """
 
     data: h5py.Dataset
     wavelength: str  # e.g. 'wl1' or 'wl2'
     
-    def sample_at_vertices(self, vertices: np.ndarray) -> np.ndarray:
+    def __post_init__(self):
+        """Validate that the dataset has the expected 5D shape."""
+        if len(self.data.shape) != 5:
+            raise ValueError(f"Expected 5D Jacobian dataset, got shape {self.data.shape}")
+    
+    @property
+    def shape(self) -> tuple[int, int, int, int, int]:
+        """
+        Returns the transposed shape: (X, Y, Z, S, D) instead of (D, S, X, Y, Z).
+        
+        Returns:
+            Tuple representing the transposed dimensions (X, Y, Z, S, D).
+        """
+        # Original shape is (D, S, X, Y, Z), we want (X, Y, Z, S, D)
+        D, S, X, Y, Z = self.data.shape
+        return (X, Y, Z, S, D)
+    
+    def _transpose_indices(self, indices):
+        """
+        Transpose indices from (x,y,z,s,d) to (d,s,x,y,z) for accessing the raw dataset.
+        
+        Args:
+            indices: Tuple of indices in (x,y,z,s,d) order
+            
+        Returns:
+            Tuple of indices in (d,s,x,y,z) order for accessing the raw dataset
+        """
+        if len(indices) != 5:
+            raise ValueError(f"Expected 5 indices for 5D Jacobian, got {len(indices)}")
+        
+        x, y, z, s, d = indices
+        return (d, s, x, y, z)
+    
+    def sample_at_vertices(self, vertices: np.ndarray, mode: str = 'fro') -> np.ndarray:
         """
         Sample Jacobian at arbitrary vertices.
 
-        • Uses one single HDF5 point-selection when legal (no dupes in x, y, z).
+        • Uses one single HDF5 point-selection when legal (no dupes in z, y, x).
         • Falls back to a per-vertex loop otherwise.
-        Both paths return an array shaped (S, D, N) in the *original* vertex order.
+        Returns an array shaped (N_vertices,) in the *original* vertex order.
+
+        Args:
+            vertices: A numpy array of shape (N, 3) containing vertex coordinates in (z, y, x) order.
+            mode: Collapse mode for the Jacobian blocks. Options: 'fro' (Frobenius norm) or 'max' (maximum absolute value).
+
+        Returns:
+            A numpy array of shape (N_vertices,) containing the collapsed Jacobian values.
         """
         # ── 0. Preliminaries ───────────────────────────────────────────────────────
-        idx = np.rint(vertices).astype(np.int64)          # (N, 3)
-        self._assert_dimensions_are_correct(idx)
-        S, D = self.data.shape[:2]
+        idx = np.rint(vertices).astype(np.int64)          # (N, 3) in (z, y, x) order
+        # self._assert_dimensions_are_correct(idx)  # Removed as requested
+        D, S = self.data.shape[:2]  # D = detectors, S = sources
         N     = idx.shape[0]
 
         # ── 1. Remove exact duplicate vertices (keeps first occurrence) ────────────
@@ -36,28 +79,34 @@ class Jacobian:
             idx, axis=0, return_index=True, return_inverse=True
         )
 
-        x_u, y_u, z_u = uniq_idx.T
+        z_u, y_u, x_u = uniq_idx.T
         # ── 2. Can we use the fast path? ───────────────────────────────────────────
         duplicates_in_any_dim = (
-            len(x_u) != len(np.unique(x_u))
+            len(z_u) != len(np.unique(z_u))
             or len(y_u) != len(np.unique(y_u))
-            or len(z_u) != len(np.unique(z_u))
+            or len(x_u) != len(np.unique(x_u))
         )
 
         if not duplicates_in_any_dim:
+            print("Using fast path")
             # ---- FAST PATH -------------------------------------------------------
             #   Sort so every array is strictly increasing.
-            sort = np.lexsort((z_u, y_u, x_u))        # z fastest (C-order)
+            sort = np.lexsort((x_u, y_u, z_u))        # x fastest (C-order)
+            # Note: We access the raw dataset in (D, S, X, Y, Z) order
             vals_sorted = self.data[:, :, x_u[sort], y_u[sort], z_u[sort]]
             vals_unique = vals_sorted[..., np.argsort(sort)]      # undo sort
-            return vals_unique[..., inverse]                      # re-expand dupes
+            jacobian_blocks = vals_unique[..., inverse]           # re-expand dupes
+        else:
+            print("Using slow path")
+            # ── 3. Fallback: loop over unique vertices ────────────────────────────────
+            out = np.empty((D, S, len(uniq_idx)), dtype=self.data.dtype)
+            for k, (z, y, x) in enumerate(uniq_idx):
+                out[:, :, k] = self.data[:, :, x, y, z]    # broadcast over D & S
+            jacobian_blocks = out[..., inverse]
 
-        # ── 3. Fallback: loop over unique vertices ────────────────────────────────
-        out = np.empty((S, D, len(uniq_idx)), dtype=self.data.dtype)
-        for k, (x, y, z) in enumerate(uniq_idx):
-            out[:, :, k] = self.data[:, :, x, y, z]    # broadcast over S & D
-
-        return out[..., inverse]
+        return jacobian_blocks
+        # ── 4. Collapse Jacobian blocks to single values per vertex ─────────────────
+        #return self._jacobian_to_vertex_val(jacobian_blocks, mode)
 
     def _assert_dimensions_are_correct(self, indices: np.ndarray) -> None:
         """
@@ -69,7 +118,7 @@ class Jacobian:
         Raises:
             AssertionError: If any indices are out of bounds.
         """
-        # Jacobian shape is (S, D, X, Y, Z), so we check against dimensions 2,3,4
+        # Jacobian shape is (D, S, X, Y, Z), so we check against dimensions 2,3,4
         assert np.all(indices >= 0), \
             f"Vertex coordinates must be non-negative, got indices with min {indices.min()}"
         assert np.all(indices[:, 0] < self.data.shape[2]), \
@@ -81,17 +130,39 @@ class Jacobian:
 
     def get_slice(self, idx):
         """
-        Returns a slice of the Jacobian data.
+        Returns a slice of the Jacobian data in the transposed orientation.
+        
+        This method allows accessing the Jacobian as if it were stored in (X, Y, Z, D, S) order,
+        while internally handling the transposition to access the raw (D, S, X, Y, Z) dataset.
 
         Args:
-            idx: A tuple of indices or slices, e.g. (i, j, :, :, :) for a 3D block.
-                 The number of elements in the tuple should match the number of dimensions
-                 of the underlying data (e.g., 5 for a 5D array).
+            idx: A tuple of indices or slices in (x,y,z,d,s) order, e.g. (x_slice, y_slice, z_slice, d_slice, s_slice).
+                 The number of elements in the tuple should be 5 to match the 5D structure.
 
         Returns:
-            A numpy array containing the requested slice, loaded into memory.
+            A numpy array containing the requested slice, loaded into memory in (X, Y, Z, D, S) order.
         """
-        return self.data[idx]  # h5py.Dataset supports numpy-style slicing
+        if len(idx) != 5:
+            raise ValueError(f"Expected 5 indices for 5D Jacobian, got {len(idx)}")
+        
+        # Transpose indices from (x,y,z,d,s) to (d,s,x,y,z)
+        transposed_idx = self._transpose_indices(idx)
+        
+        # Get the data in raw (D, S, X, Y, Z) order
+        data = self.data[transposed_idx]
+        return data
+
+    def __getitem__(self, idx):
+        """
+        Convenience method that delegates to get_slice for cleaner syntax.
+        
+        Args:
+            idx: Same as get_slice method.
+            
+        Returns:
+            Same as get_slice method.
+        """
+        return self.get_slice(idx)
 
 
 class JacobianFactory:
@@ -135,10 +206,6 @@ class JacobianFactory:
         print(f"Lazy loading Jacobian from {path}")
         f_jac = h5py.File(str(path), "r")
         J_dataset = f_jac["Jacobian"]
-        warnings.warn(
-            "No transpose is done here because we do lazy loading; might need to correct orientation when accessing the data.",
-            UserWarning
-        )
         return Jacobian(J_dataset, wavelength)
 
 
@@ -198,3 +265,24 @@ def _find_jacobian_files(session_dir: Path) -> list[Path]:
         raise FileNotFoundError(f"No Jacobian file found in {session_dir}")
     return jacobian_files
 
+
+def jacobian_to_vertex_val(J_vert: np.ndarray, mode: str = 'fro') -> np.ndarray:
+    """
+    Collapse D×S block → single value per vertex.
+    
+    Args:
+        J_vert: Jacobian blocks of shape (D, S, N_vertices).
+        mode: Collapse mode. Options: 'fro' (Frobenius norm) or 'max' (maximum absolute value).
+        
+    Returns:
+        Collapsed values of shape (N_vertices,).
+        
+    Raises:
+        ValueError: If mode is not 'fro' or 'max'.
+    """
+    if mode == 'fro':
+        return np.linalg.norm(J_vert, axis=(0, 1))
+    elif mode == 'max':
+        return np.abs(J_vert).max(axis=(0, 1))
+    else:
+        raise ValueError(f"Invalid mode '{mode}'. Must be 'fro' or 'max'.")

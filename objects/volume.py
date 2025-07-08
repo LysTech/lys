@@ -95,8 +95,14 @@ def from_jnii(file_path: str, **kwargs) -> Volume:
     print("NIFTI Header:")
     pprint.pprint(raw['struct']['NIFTIHeader'])
 
-    volumeData = np.array(raw["struct"]["NIFTIData"]["_ArrayData_"], dtype=float)
-    volumeData = volumeData.reshape(raw["struct"]["NIFTIHeader"]["Dim"])
+    #volumeData = np.array(raw["struct"]["NIFTIData"]["_ArrayData_"], dtype=float)
+    #volumeData = volumeData.reshape(raw["struct"]["NIFTIHeader"]["Dim"])
+    flat = np.asarray(raw["struct"]["NIFTIData"]["_ArrayData_"], dtype=float)
+    vol = flat.reshape((192, 256, 256), order='F')
+    # --------‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑‑ here ------------
+    # use Fortran order when turning the 1‑D list back into (x,y,z)
+    volumeData = flat.reshape((192, 256, 256), order='F') #try the same stuff as v1
+    # ----------------------------------------------------------
     print("Volume data gets divide by 50.")
     volumeData = volumeData / 50.0
     return Volume(volumeData, **kwargs)

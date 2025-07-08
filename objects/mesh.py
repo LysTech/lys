@@ -40,11 +40,13 @@ def load_unMNI_mesh(patient: str):
     """
     from lys.visualization.plot3d import VTKScene
     mni_mesh = from_mat(mni_mesh_path(patient))
+    mni_mesh.vertices = mni_mesh.vertices[:, ::-1] #flip XYZ -> ZYX for matlab fortran order compatibility
     segmentation = load_charm_segmentation(patient)
     nativespace_mesh = mni_to_nativespace(mni_mesh, segmentation, patient)
     eigenmodes = load_eigenmodes(patient)
     nativespace_mesh.eigenmodes = eigenmodes
-    VTKScene().add(segmentation).add(nativespace_mesh).show() # plot for visual check
+    #TODO: this plot doesn't *always* show, why not??? (i think has to do with vtk/gui event loop shit)
+    VTKScene().add(segmentation).add(nativespace_mesh).format(segmentation, opacity=0.02).show() # plot for visual check
     return nativespace_mesh
 
 
@@ -278,6 +280,12 @@ class TimeSeriesMeshData(Plottable):
 
 
 def mni_to_nativespace(mesh: Mesh, segmentation: Atlas, patient: str):
+    """
+    Transform mesh from MNI space to native space, assuming vertices are in ZYX order.
+    All coordinate operations (translations, scaling, affine) are applied in ZYX order:
+    - vertices[:, 0] is Z, vertices[:, 1] is Y, vertices[:, 2] is X
+    - All translation and scaling vectors must be reordered accordingly
+    """
     tissue = 2  # 2 is the white matter, 3 is CSF
     vol = segmentation.array.flatten()
     vol[vol != tissue] = 0
@@ -287,11 +295,16 @@ def mni_to_nativespace(mesh: Mesh, segmentation: Atlas, patient: str):
 
     affine_matrix, x_scales, y_scales, z_scales = read_adjBBX_file(patient)
 
-    vertices = vertices - np.array([128, 128, 128])  # shift AC to origin
-    vertices = undo_the_scaling(vertices, x_scales, y_scales, z_scales)
-    vertices = undo_affine_transformation(vertices, affine_matrix)
-    vertices = vertices + np.array([128, 128, 96])  # AC point starts at O -> move it
-    vertices = align_with_csf(vertices, vol, tissue)
+    # Reorder translation vectors for ZYX
+    vertices = vertices - np.array([128, 128, 128])  # shift AC to origin (ZYX order)
+    # Reorder scales for ZYX: (z_scales, y_scales, x_scales)
+    vertices = undo_the_scaling(vertices, z_scales, y_scales, x_scales)
+    # Permute ZYX -> XYZ for affine, then back
+    vertices_xyz = vertices[:, [2, 1, 0]]
+    vertices_xyz = undo_affine_transformation(vertices_xyz, affine_matrix)
+    vertices = vertices_xyz[:, [2, 1, 0]]  # back to ZYX
+    vertices = vertices + np.array([96, 128, 128])  # AC point starts at O -> move it (ZYX order)
+    #vertices = align_with_csf(vertices, vol, tissue)
     mesh.vertices = vertices
     return mesh
 

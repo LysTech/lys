@@ -6,6 +6,8 @@ from lys.visualization.plot3d import VTKScene
 from lys.utils.paths import lys_data_dir
 import os
 
+""" Demo of 3D plots """
+
 # Construct a volume
 seg = load_charm_segmentation("P03")
 

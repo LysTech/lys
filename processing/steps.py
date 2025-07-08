@@ -75,7 +75,6 @@ class ReconstructWithEigenmodes(ProcessingStep):
 
 
 
-
     def compute_Bmn(self, vertex_jacobian: np.ndarray, phi: np.ndarray) -> np.ndarray:
         """
         Parameters
@@ -101,7 +100,6 @@ class ReconstructWithEigenmodes(ProcessingStep):
         S, D, M = B_sdm.shape
         Bmn = B_sdm.reshape(S * D, M, order='F')
         return Bmn
-
 
 
 class ConvertToTStats(ProcessingStep):
