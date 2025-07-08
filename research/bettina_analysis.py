@@ -30,6 +30,7 @@ config = [
     {"ConvertWavelengthsToOD": {}},
     {"ConvertODtoHbOandHbR": {}},
     {"RemoveScalpEffect": {}},
+    {"ConvertToTStats": {}},
     {"ReconstructWithEigenmodes": {"num_eigenmodes": 390}}
 ]
 

@@ -87,6 +87,7 @@ class Jacobian:
             or len(x_u) != len(np.unique(x_u))
         )
 
+        #TODO: I notice I am confused by this thing. Seems to always use slow path. dumb to have many paths anyways
         if not duplicates_in_any_dim:
             print("Using fast path")
             # ---- FAST PATH -------------------------------------------------------
