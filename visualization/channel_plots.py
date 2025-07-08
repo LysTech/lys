@@ -119,7 +119,7 @@ class ChannelsPlot:
         
         # Create individual plot widgets for all channels
         self.plot_widgets = []
-        for i in tqdm(range(num_channels)):
+        for i in tqdm(range(num_channels), desc="Creating plots"):
             # Create plot widget
             plot_widget = pg.PlotWidget()
             plot_widget.setBackground(None)
