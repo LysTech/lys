@@ -8,7 +8,10 @@ TODO:
 ## Table of Contents
 
 - [Demo Usage](#demo-usage)
+  - [Processing Demo](#processing-demo)
 - [Visualization](#visualization)
+  - [3D plots](#3d-plots)
+  - [Channel Data Plots](#channel-data-plots)
 - [Preprocessing](#preprocessing)
 - [Patient Class](#patient-class)
 - [Jacobian](#jacobian)
@@ -78,6 +81,8 @@ The `/examples` directory contains example scripts that demonstrate how to use t
 
 ## Visualization
 
+### 3D plots
+
 The idea is to respect the Open-Closed principle + have composability. Whenever we define a new object that we want to be able to plot, it just needs to have a `to_vtk` method that returns a vtkActor and the `VTKScene` class can plot it. 
 
 A few examples:
@@ -142,7 +147,7 @@ StaticDataMesh and TimeSeriesDataMesh styles can be changed with: new opacities,
 - For `TimeSeriesMeshData`, you can update opacity and colormap (applies to the current timepoint's data).
 
 
-**Channel Plots** 
+### Channel Data Plots 
 
 See `examples/channelplot_demo.py` for an example you can run.
 
