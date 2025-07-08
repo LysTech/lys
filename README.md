@@ -153,8 +153,11 @@ plot = ChannelsPlot()
 plot.plot(data.T) # expects shape: num channels x num timepoints
 ```
 
-![Channel Plots visualization example](assets/channelplot_all.png)
-![example 2](assets/channelplot_single.png)
+
+<p align="center">
+  <img src="assets/channelplot_all.png" alt="Channel Plots visualization example" width="350"/>
+  <img src="assets/channelplot_single.png" alt="example 2" width="350"/>
+</p>
 
 **Snapshot Testing for Visualization**
 
