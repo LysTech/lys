@@ -104,6 +104,27 @@ class Jacobian:
         # ── 4. Collapse Jacobian blocks to single values per vertex ─────────────────
         #return self._jacobian_to_vertex_val(jacobian_blocks, mode)
 
+    def jacobian_to_vertex_val(J_vert: np.ndarray, mode: str = 'fro') -> np.ndarray:
+        """
+        Collapse D×S block → single value per vertex.
+        
+        Args:
+            J_vert: Jacobian blocks of shape (D, S, N_vertices).
+            mode: Collapse mode. Options: 'fro' (Frobenius norm) or 'max' (maximum absolute value).
+            
+        Returns:
+            Collapsed values of shape (N_vertices,).
+            
+        Raises:
+            ValueError: If mode is not 'fro' or 'max'.
+        """
+        if mode == 'fro':
+            return np.linalg.norm(J_vert, axis=(0, 1))
+        elif mode == 'max':
+            return np.abs(J_vert).max(axis=(0, 1))
+        else:
+            raise ValueError(f"Invalid mode '{mode}'. Must be 'fro' or 'max'.")
+
     def _assert_dimensions_are_correct(self, indices: np.ndarray) -> None:
         """
         Asserts that the given indices are within bounds for the Jacobian's spatial dimensions.
