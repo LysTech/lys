@@ -26,25 +26,36 @@ def test_sample_at_vertices():
     # Test sampling at integer coordinates (on grid points)
     vertices_on_grid = np.array([[0, 0, 0], [1, 1, 1], [2, 2, 2]])
     # Expected shape is (N=3) where N is number of vertices
-    # For vertex [0,0,0]: all values are 0, Frobenius norm = sqrt(0² * 2 * 2) = 0
-    # For vertex [1,1,1]: all values are 3, Frobenius norm = sqrt(3² * 2 * 2) = sqrt(36) = 6
-    # For vertex [2,2,2]: all values are 6, Frobenius norm = sqrt(6² * 2 * 2) = sqrt(144) = 12
-    expected_on_grid = np.array([0., 6., 12.])
+
+
+    expected_on_grid = np.array([[[0, 0],
+        [0, 0]],
+
+       [[3, 3],
+        [3, 3]],
+
+       [[6, 6],
+        [6, 6]]])
     sampled_on_grid = j.sample_at_vertices(vertices_on_grid)
     np.testing.assert_allclose(sampled_on_grid, expected_on_grid)
-    assert sampled_on_grid.shape == (3,)  # (N_vertices,)
+    assert sampled_on_grid.shape == (3, 2, 2)  # (V, S, D)
 
     # Test sampling between grid points (discretization to nearest integer)
     vertices_between_grid = np.array([[0.5, 0.5, 0.5], [1.5, 1.5, 1.5]])
-    # [0.5,0.5,0.5] -> [0, 0, 0] = 0, [1.5,1.5,1.5] -> [2,2,2] = 12
-    expected_between_grid = np.array([0., 12.])
+    # [0.5,0.5,0.5] -> [0, 0, 0], [1.5,1.5,1.5] -> [2,2,2]
+    expected_between_grid = np.array([[[0, 0],
+        [0, 0]],
+
+       [[6, 6],
+        [6, 6]]])
+
     sampled_between_grid = j.sample_at_vertices(vertices_between_grid)
     np.testing.assert_allclose(sampled_between_grid, expected_between_grid)
-    assert sampled_between_grid.shape == (2,)  # (N_vertices,)
+    assert sampled_between_grid.shape == (2,2,2)  # (V, S, D)
 
     # Test sampling outside the bounds (should raise AssertionError)
     vertices_outside = np.array([[-1, 0, 0], [10, 10, 10]])
-    with pytest.raises(AssertionError):
+    with pytest.raises(IndexError):
         j.sample_at_vertices(vertices_outside)
 
 
@@ -57,47 +68,19 @@ def test_sample_at_vertices_unsorted():
     # Unsorted vertices that would fail h5py's monotonicity requirement
     vertices_unsorted = np.array([[2, 2, 2], [0, 0, 0], [1, 1, 1]])
     
-    # Expected values: 
-    # vertex [2,2,2]: all values are 6, Frobenius norm = sqrt(6² * 2 * 2) = sqrt(144) = 12
-    # vertex [0,0,0]: all values are 0, Frobenius norm = sqrt(0² * 2 * 2) = 0
-    # vertex [1,1,1]: all values are 3, Frobenius norm = sqrt(3² * 2 * 2) = sqrt(36) = 6
-    # The output should be in the same order as the input vertices.
-    expected_values = np.array([12., 0., 6.])
+    expected_values= np.array([[[6, 6],
+        [6, 6]],
+
+       [[0, 0],
+        [0, 0]],
+
+       [[3, 3],
+        [3, 3]]])
     
     sampled_unsorted = j.sample_at_vertices(vertices_unsorted)
     np.testing.assert_allclose(sampled_unsorted, expected_values)
-    assert sampled_unsorted.shape == (3,)  # (N_vertices,)
+    assert sampled_unsorted.shape == (3,2, 2)  # (V, S, D)
 
-
-def test_sample_at_vertices_modes():
-    """Tests that sample_at_vertices works with different collapse modes."""
-    # Create a simple 2x2x2x2x2 jacobian with known values
-    # Shape is (S=2, D=2, X=2, Y=2, Z=2)
-    data = np.zeros((2, 2, 2, 2, 2))
-    # Set specific values for testing
-    data[0, 0, 0, 0, 0] = 3  # One non-zero value at [0,0,0,0,0]
-    data[1, 1, 1, 1, 1] = 4  # One non-zero value at [1,1,1,1,1]
-    j = Jacobian(data, wavelength='wl1')
-
-    vertices = np.array([[0, 0, 0], [1, 1, 1]])
-    
-    # Test 'fro' mode (Frobenius norm)
-    # For vertex [0,0,0]: only one non-zero value (3), Frobenius norm = sqrt(3²) = 3
-    # For vertex [1,1,1]: only one non-zero value (4), Frobenius norm = sqrt(4²) = 4
-    expected_fro = np.array([3., 4.])
-    sampled_fro = j.sample_at_vertices(vertices, mode='fro')
-    np.testing.assert_allclose(sampled_fro, expected_fro)
-    
-    # Test 'max' mode (maximum absolute value)
-    # For vertex [0,0,0]: max absolute value = 3
-    # For vertex [1,1,1]: max absolute value = 4
-    expected_max = np.array([3., 4.])
-    sampled_max = j.sample_at_vertices(vertices, mode='max')
-    np.testing.assert_allclose(sampled_max, expected_max)
-    
-    # Test invalid mode
-    with pytest.raises(ValueError, match="Invalid mode 'invalid'. Must be 'fro' or 'max'."):
-        j.sample_at_vertices(vertices, mode='invalid')
 
 
 def test_load_jacobian_from_mat(tmp_path):

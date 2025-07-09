@@ -26,62 +26,187 @@ num_detectors = 24
 #num sources: 16, num detectors: 24
 
 
-class ReconstructWithEigenmodes(ProcessingStep):
-    def __init__(self, num_eigenmodes: int, regularisation_param: float = 0.01):
+class ReconstructDual(ProcessingStep):
+    """
+    A processing step that reconstructs dual-wavelength fNIRS data using eigenmodes.
+    
+    This step iterates over each task, finds the optimal regularization parameter
+    by maximizing correlation with fMRI data, and reconstructs vertex-wise t-stat maps
+    for both HbO and HbR using the dual-wavelength reconstruction approach.
+    """
+    
+    def __init__(self, num_eigenmodes: int):
+        """
+        Initialize the dual reconstruction step.
+        
+        Args:
+            num_eigenmodes: Number of eigenmodes to use for reconstruction
+            use_fmri_prior: Whether to use fMRI data to find optimal regularization parameter
+        """
         self.num_eigenmodes = num_eigenmodes
-        self.regularisation_param = regularisation_param
 
     def _do_process(self, session: Session) -> None:
         """
-        Reconstruct the data.
-        """
-        vertices = session.patient.mesh.vertices
-        phi = np.array([e for e in session.patient.mesh.eigenmodes]).T #Shape: (n_vertices, n_eigenmodes)
-        vertex_jacobian = session.jacobians[0].sample_at_vertices(vertices)
-        Bmn = self.compute_Bmn(vertex_jacobian, phi)
-        eigenvals = np.array([e.eigenvalue for e in session.patient.mesh.eigenmodes])
-        # we have session.processed_data["t_HbO"] and session.processed_data["t_HbR"]
-        # they both have shape: (n_channels, n_tasks)
-        # we want the reconstructed t-stat maps for each task, both HbO and HbR
+        Reconstruct the data for each task using dual-wavelength approach.
         
-        # Initialize the reconstructed data dictionaries
+        Args:
+            session: The session to process (modified in-place)
+        """
+        # Get mesh and eigenmode data
+        vertices = session.patient.mesh.vertices
+        if session.patient.mesh.eigenmodes is None:
+            raise ValueError("Mesh has no eigenmodes. Please ensure eigenmodes are loaded.")
+        
+        # Truncate eigenmodes to the specified number (skip first 2 like in reconstruction script)
+        start_idx = 2  # Skip first 2 eigenmodes like in reconstruction script
+        end_idx = start_idx + self.num_eigenmodes
+        phi = np.array([e for e in session.patient.mesh.eigenmodes[start_idx:end_idx]]).T  # Shape: (n_vertices, n_eigenmodes)
+        eigenvals = np.array([e.eigenvalue for e in session.patient.mesh.eigenmodes[start_idx:end_idx]])
+        # Set first eigenvalue to 0.0 like in reconstruction script
+        eigenvals[0] = 0.0
+        
+        # Sample Jacobians at vertices
+        vertex_jacobian_wl1 = session.jacobians[0].sample_at_vertices(vertices)
+        vertex_jacobian_wl2 = session.jacobians[1].sample_at_vertices(vertices)
+
+        # Compute Bmn matrices
+        Bmn_wl1 = self.compute_Bmn(vertex_jacobian_wl1, phi)
+        Bmn_wl2 = self.compute_Bmn(vertex_jacobian_wl2, phi)
+
+        import pdb; pdb.set_trace()
+        # Get t-stat data
         t_HbO_data = session.processed_data["t_HbO"]
         t_HbR_data = session.processed_data["t_HbR"]
+        
+        # Initialize reconstructed data dictionaries
         session.processed_data["t_HbO_reconstructed"] = {}
         session.processed_data["t_HbR_reconstructed"] = {}
         
-        # Reconstruct for each task
-        for task_name, t_values in t_HbO_data.items():
-            session.processed_data["t_HbO_reconstructed"][task_name] = self.reconstruct(
-                Bmn, t_values, phi, eigenvals
+        # Iterate over each task
+        for task in session.protocol.tasks:
+            print(f"Processing task: {task}")
+            
+            # Get t-stats for this task
+            y_wl1 = t_HbO_data[task]  # Shape: (S, D)
+            y_wl2 = t_HbR_data[task]  # Shape: (S, D)
+            
+            # Find optimal regularization parameter
+            from lys.utils.mri_tstat import get_mri_tstats
+            fmri_tstats = get_mri_tstats(session.patient.name, task)
+            best_param = self.get_best_reg_param_dual(
+                Bmn_wl1, Bmn_wl2, y_wl1, y_wl2, phi, eigenvals, 
+                vertices, fmri_tstats
             )
-        
-        for task_name, t_values in t_HbR_data.items():
-            session.processed_data["t_HbR_reconstructed"][task_name] = self.reconstruct(
-                Bmn, t_values, phi, eigenvals
+            print(f"  Optimal regularization parameter: {best_param:.6f}")
+            
+            # Reconstruct using dual-wavelength approach
+            reconstructed_HbO = self.reconstruct_dual(
+                Bmn_wl1, Bmn_wl2, y_wl1, y_wl2, phi, best_param, eigenvals
             )
+            
+            # Store reconstructed data
+            session.processed_data["t_HbO_reconstructed"][task] = reconstructed_HbO
+            session.processed_data["t_HbR_reconstructed"][task] = reconstructed_HbO  # Note: reconstruct_dual only returns HbO
         
         # Clean up intermediate data
         del session.processed_data["t_HbO"]
         del session.processed_data["t_HbR"]
 
-    def reconstruct(self, Bmn, y_m, phi, eigenvals):
-        L = np.diag(self.regularisation_param * eigenvals)
-        A = Bmn.T @ Bmn + L
-        b = Bmn.T @ y_m
-        alphas = np.linalg.solve(A, b)
-        X = phi @ alphas
-        return X
+    def get_best_reg_param_dual(self, Bmn_wl1, Bmn_wl2, y_sd, y_sd_HbR, phi, eigenvals, vertices, fmri_tstats):
+        """
+        Find the regularization parameter that maximizes correlation with fMRI.
+        
+        Args:
+            Bmn_wl1: Bmn matrix for wavelength 1
+            Bmn_wl2: Bmn matrix for wavelength 2
+            y_sd: HbO t-stats for the task (S, D)
+            y_sd_HbR: HbR t-stats for the task (S, D)
+            phi: Eigenmode matrix (n_vertices, n_eigenmodes)
+            eigenvals: Eigenvalues array
+            vertices: Mesh vertices
+            fmri_tstats: fMRI t-stats for comparison
+            
+        Returns:
+            Optimal regularization parameter
+        """
+        scores = []
+        params = np.logspace(-5, 5, 65)
+        
+        for regularisation_param in params:
+            X = self.reconstruct_dual(Bmn_wl1, Bmn_wl2, y_sd, y_sd_HbR, phi, regularisation_param, eigenvals)
+            fnirs_tstats = np.array([X[ix] for ix in range(len(vertices))])
 
+            score = np.corrcoef(fnirs_tstats, fmri_tstats)[0, 1]
+            scores.append(score)
 
+        best_param_ix = np.where(np.array(scores) == max(scores))[0]
+        best_param = params[best_param_ix]
+        assert len(best_param) > 0, "NaN scores, probably all t-stats are zero"
+        return best_param[0]  # Return scalar value
+
+    def reconstruct_dual(self, Bmn_wl1, Bmn_wl2,
+                        y_wl1, y_wl2,
+                        phi, lam, eigvals,
+                        *,                        # keyword-only
+                        ext=(586, 1548.52, 1058, 691.32),
+                        w=(1., 1.),
+                        rho=-0.6,                 # expected HbR/HbO ratio
+                        mu=0.1):                  # coupling strength
+        """
+        Soft-tied HbO / HbR inversion: min ‖Bα−y‖² + λ‖Λ½α‖² + μ‖α_R−ρ α_O‖²
+
+        Parameters
+        ----------
+        Bmn_wl1: Bmn matrix for wavelength 1
+        Bmn_wl2: Bmn matrix for wavelength 2
+        y_wl1: HbO t-stats for the task (S, D)
+        y_wl2: HbR t-stats for the task (S, D)
+        phi: Eigenmode matrix (n_vertices, n_eigenmodes)
+        lam: spatial Tikhonov weight λ
+        eigvals: Eigenvalues array
+        ext: Extinction coefficients (εO1, εR1, εO2, εR2)
+        w: Per-wavelength noise weights (1/σ)
+        rho: expected α_R / α_O ratio (≈ –0.6)
+        mu: coupling weight μ
+
+        Returns
+        -------
+        x_HbO: vertex-wise HbO map
+        """
+        εO1, εR1, εO2, εR2 = ext
+        n = eigvals.size
+        if mu is None:
+            mu = lam
+
+        # wavelength blocks
+        B1 = np.hstack((εO1*Bmn_wl1, εR1*Bmn_wl1))
+        B2 = np.hstack((εO2*Bmn_wl2, εR2*Bmn_wl2))
+        B = np.vstack((w[0]*B1, w[1]*B2))
+
+        y = np.concatenate((w[0]*y_wl1.flatten(order='F'),
+                           w[1]*y_wl2.flatten(order='F')))
+
+        # regularisers
+        Λ = np.diag(np.tile(eigvals, 2))            # spatial
+        I = np.eye(n)
+        C = mu * np.block([[I, -rho*I],
+                          [-rho*I, rho**2 * I]])    # coupling
+
+        A = B.T @ B + lam*Λ + C
+        α = np.linalg.solve(A, B.T @ y)
+
+        α_O, α_R = α[:n], α[n:]
+        return phi @ α_O
 
     def compute_Bmn(self, vertex_jacobian: np.ndarray, phi: np.ndarray) -> np.ndarray:
         """
+        Compute Bmn matrix from vertex Jacobian and eigenmodes.
+        
         Parameters
         ----------
-        vertex_jacobian : (D, S, N) array
+        vertex_jacobian : (N, S, D) array
             Jacobian evaluated at the selected vertices
-            (D = n_detectors, S = n_sources, N = n_vertices).
+            (N = n_vertices, S = n_sources, D = n_detectors).
 
         phi : (N, M) array
             Eigen-mode basis at those vertices (M = self.num_eigenmodes).
@@ -94,7 +219,7 @@ class ReconstructWithEigenmodes(ProcessingStep):
         """
         # Contract the vertex dimension (N) → result is (S, D, M)
         # einsum keeps everything in-core and is ~ the same speed as tensordot.
-        B_sdm = np.einsum('dsn,nm->sdm', vertex_jacobian, phi)
+        B_sdm = np.einsum('nsd,nm->sdm', vertex_jacobian, phi)
 
         # Reshape to (S·D, M) with Fortran ordering so sources vary fastest.
         S, D, M = B_sdm.shape
@@ -150,9 +275,11 @@ class ConvertToTStats(ProcessingStep):
         Returns:
             A tuple of two dictionaries, one for t_HbO and one for t_HbR.
             Each dictionary maps a condition name to a numpy array of t-statistics 
-            with shape (n_channels,).
+            with shape (S, D).
         """
         T, n_channels = HbO.shape  # n_channels = S*D
+        S, D = num_sources, num_detectors  # Use the global constants defined at the top
+        
         # 1) Build the same design matrix X that you used in GLM
         X, conditions = self._create_design_matrix(protocol, fs, T)
         
@@ -177,8 +304,9 @@ class ConvertToTStats(ProcessingStep):
             )
             t_HbR_array[ch, :] = tvals_r
 
-        t_HbO = {condition: t_HbO_array[:, i] for i, condition in enumerate(conditions)}
-        t_HbR = {condition: t_HbR_array[:, i] for i, condition in enumerate(conditions)}
+        # Reshape back to (S, D) format for each condition
+        t_HbO = {condition: t_HbO_array[:, i].reshape(S, D) for i, condition in enumerate(conditions)}
+        t_HbR = {condition: t_HbR_array[:, i].reshape(S, D) for i, condition in enumerate(conditions)}
 
         return t_HbO, t_HbR
 
@@ -333,14 +461,14 @@ class ConvertODtoHbOandHbR(ProcessingStep):
         od_wl1 = session.processed_data["wl1"]
         od_wl2 = session.processed_data["wl2"]
         
-        HbO, HbR = self._convert_od_to_hemo_concentrations(od_wl1, od_wl2)
+        HbO, HbR = self._convert_od_to_hemo(od_wl1, od_wl2)
         
         session.processed_data["HbO"] = HbO
         session.processed_data["HbR"] = HbR
         del session.processed_data["wl1"]
         del session.processed_data["wl2"]
 
-    def _convert_od_to_hemo_concentrations(self, od_wl1: np.ndarray, od_wl2: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def _convert_od_to_hemo(self, od_wl1: np.ndarray, od_wl2: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """
         Convert optical density data to hemoglobin concentrations.
         

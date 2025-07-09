@@ -59,14 +59,19 @@ class Jacobian:
 
         • Uses one single HDF5 point-selection when legal (no dupes in z, y, x).
         • Falls back to a per-vertex loop otherwise.
-        Returns an array shaped (N_vertices,) in the *original* vertex order.
+        Returns Jacobian blocks for each vertex in the original vertex order.
 
         Args:
             vertices: A numpy array of shape (N, 3) containing vertex coordinates in (z, y, x) order.
             mode: Collapse mode for the Jacobian blocks. Options: 'fro' (Frobenius norm) or 'max' (maximum absolute value).
+                Note: Currently not used as the method returns raw Jacobian blocks.
 
         Returns:
-            A numpy array of shape (N_vertices,) containing the collapsed Jacobian values.
+            A numpy array of shape (N, S, D) where:
+            - N is the number of vertices
+            - S is the number of sources  
+            - D is the number of detectors
+            Each (S, D) block represents the Jacobian matrix at the corresponding vertex.
         """
         # ── 0. Preliminaries ───────────────────────────────────────────────────────
         idx = np.rint(vertices).astype(np.int64)          # (N, 3) in (z, y, x) order
@@ -87,23 +92,13 @@ class Jacobian:
             or len(x_u) != len(np.unique(x_u))
         )
 
-        #TODO: I notice I am confused by this thing. Seems to always use slow path. dumb to have many paths anyways
-        if not duplicates_in_any_dim:
-            print("Using fast path")
-            # ---- FAST PATH -------------------------------------------------------
-            #   Sort so every array is strictly increasing.
-            sort = np.lexsort((x_u, y_u, z_u))        # x fastest (C-order)
-            # Note: We access the raw dataset in (D, S, X, Y, Z) order
-            vals_sorted = self.data[:, :, x_u[sort], y_u[sort], z_u[sort]]
-            vals_unique = vals_sorted[..., np.argsort(sort)]      # undo sort
-            jacobian_blocks = vals_unique[..., inverse]           # re-expand dupes
-        else:
-            print("Using slow path")
-            # ── 3. Fallback: loop over unique vertices ────────────────────────────────
-            out = np.empty((D, S, len(uniq_idx)), dtype=self.data.dtype)
-            for k, (z, y, x) in enumerate(uniq_idx):
-                out[:, :, k] = self.data[:, :, x, y, z]    # broadcast over D & S
-            jacobian_blocks = out[..., inverse]
+        #TODO: can this be sped up?
+        print("Using slow path")
+        # ── 3. Fallback: loop over unique vertices ────────────────────────────────
+        out = np.empty((len(uniq_idx), S, D), dtype=self.data.dtype)
+        for k, (z, y, x) in enumerate(uniq_idx):
+            out[k, :, :] = self.data[:, :, x, y, z].T    # transpose to (S, D) and assign to (k, S, D)
+        jacobian_blocks = out[inverse]
 
         return jacobian_blocks
         # ── 4. Collapse Jacobian blocks to single values per vertex ─────────────────
@@ -226,6 +221,7 @@ def load_jacobians_from_session_dir(session_dir: Path) -> list[Jacobian]:
     jacobian_files = _find_jacobian_files(session_dir)
     print(f"Found {len(jacobian_files)} Jacobian file(s) in {session_dir}")
     jacobian_files = _find_jacobian_files(session_dir)
+    #TODO: I think it may be bad code, ordering by wavelength is sorta implicit, BAD!
     return [_jacobian_factory.get(path) for path in jacobian_files]
 
 
@@ -268,24 +264,3 @@ def _find_jacobian_files(session_dir: Path) -> list[Path]:
     
     return sorted(jacobian_files)
 
-
-def jacobian_to_vertex_val(J_vert: np.ndarray, mode: str = 'fro') -> np.ndarray:
-    """
-    Collapse D×S block → single value per vertex.
-    
-    Args:
-        J_vert: Jacobian blocks of shape (D, S, N_vertices).
-        mode: Collapse mode. Options: 'fro' (Frobenius norm) or 'max' (maximum absolute value).
-        
-    Returns:
-        Collapsed values of shape (N_vertices,).
-        
-    Raises:
-        ValueError: If mode is not 'fro' or 'max'.
-    """
-    if mode == 'fro':
-        return np.linalg.norm(J_vert, axis=(0, 1))
-    elif mode == 'max':
-        return np.abs(J_vert).max(axis=(0, 1))
-    else:
-        raise ValueError(f"Invalid mode '{mode}'. Must be 'fro' or 'max'.")
