@@ -254,17 +254,19 @@ def _extract_wavelength_from_path(path: str) -> str:
 def _find_jacobian_files(session_dir: Path) -> list[Path]:
     """
     Finds all files in the session directory with 'jacobian' in their name.
+    Files are sorted by filename for consistent ordering.
 
     Args:
         session_dir: A Path object pointing to the session directory.
 
     Returns:
-        A list of Path objects for Jacobian files.
+        A list of Path objects for Jacobian files, sorted by filename.
     """
     jacobian_files = [f for f in session_dir.iterdir() if 'jacobian' in f.name.lower()]
     if not jacobian_files:
         raise FileNotFoundError(f"No Jacobian file found in {session_dir}")
-    return jacobian_files
+    
+    return sorted(jacobian_files)
 
 
 def jacobian_to_vertex_val(J_vert: np.ndarray, mode: str = 'fro') -> np.ndarray:

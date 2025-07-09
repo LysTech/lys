@@ -151,4 +151,47 @@ def test_find_jacobian_files(tmp_path):
         _find_jacobian_files(empty_dir)
 
 
+def test_find_jacobian_files_filename_ordering(tmp_path):
+    """Test that _find_jacobian_files returns files ordered by filename."""
+    from lys.objects.jacobian import _find_jacobian_files
+    
+    # Test 1: Wavelength naming convention (wl1, wl2)
+    jacobian_wl2 = tmp_path / "jacobian_wl2.mat"
+    jacobian_wl2.touch()
+    jacobian_wl1 = tmp_path / "jacobian_wl1.mat"
+    jacobian_wl1.touch()
+    
+    paths_wl = _find_jacobian_files(tmp_path)
+    
+    # Check that we have all the expected files
+    expected_files_wl = {"jacobian_wl1.mat", "jacobian_wl2.mat"}
+    assert set(p.name for p in paths_wl) == expected_files_wl
+    
+    # Check that wl1 comes before wl2 lexicographically
+    file_names_wl = [p.name for p in paths_wl]
+    expected_order_wl = ["jacobian_wl1.mat", "jacobian_wl2.mat"]
+    assert file_names_wl == expected_order_wl, f"Expected order {expected_order_wl}, got {file_names_wl}"
+    
+    # Clean up for next test
+    jacobian_wl1.unlink()
+    jacobian_wl2.unlink()
+    
+    # Test 2: Numeric wavelength naming convention (350nm, 780nm)
+    jacobian_350nm = tmp_path / "jacobian_350nm.mat"
+    jacobian_350nm.touch()
+    jacobian_780nm = tmp_path / "jacobian_780nm.mat"
+    jacobian_780nm.touch()
+    
+    paths_nm = _find_jacobian_files(tmp_path)
+    
+    # Check that we have all the expected files
+    expected_files_nm = {"jacobian_350nm.mat", "jacobian_780nm.mat"}
+    assert set(p.name for p in paths_nm) == expected_files_nm
+    
+    # Check that 350nm comes before 780nm lexicographically
+    file_names_nm = [p.name for p in paths_nm]
+    expected_order_nm = ["jacobian_350nm.mat", "jacobian_780nm.mat"]
+    assert file_names_nm == expected_order_nm, f"Expected order {expected_order_nm}, got {file_names_nm}"
+
+
 
