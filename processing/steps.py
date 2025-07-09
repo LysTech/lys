@@ -73,7 +73,6 @@ class ReconstructDual(ProcessingStep):
         Bmn_wl1 = self.compute_Bmn(vertex_jacobian_wl1, phi)
         Bmn_wl2 = self.compute_Bmn(vertex_jacobian_wl2, phi)
 
-        import pdb; pdb.set_trace()
         # Get t-stat data
         t_HbO_data = session.processed_data["t_HbO"]
         t_HbR_data = session.processed_data["t_HbR"]
@@ -683,3 +682,66 @@ class BandpassFilter(ProcessingStep):
         filtered_data = signal.filtfilt(b, a, data, axis=0)
         
         return filtered_data
+
+
+class CroppingStep(ProcessingStep):
+    """
+    A processing step that crops raw wavelength data and adjusts protocol intervals.
+    
+    This step removes a specified number of samples from the beginning and end of
+    the time series and updates the protocol intervals to match the new time base.
+    """
+    
+    def __init__(self, crop_samples: int = 50):
+        """
+        Initialize the cropping step.
+        
+        Args:
+            crop_samples: Number of samples to remove from both beginning and end
+        """
+        self.crop_samples = crop_samples
+
+    def _do_process(self, session: Session) -> None:
+        """
+        Crop the raw wavelength data and adjust protocol intervals.
+        
+        Args:
+            session: The session to process (modified in-place)
+        """
+        # Crop the raw wavelength data
+        session.processed_data["wl1"] = session.processed_data["wl1"][self.crop_samples:-self.crop_samples, ...]
+        session.processed_data["wl2"] = session.processed_data["wl2"][self.crop_samples:-self.crop_samples, ...]
+        
+        # Adjust protocol intervals
+        session.protocol = self._adjust_protocol(session.protocol, self.crop_samples)
+    
+    def _adjust_protocol(self, protocol, crop_samples: int):
+        """
+        Adjust protocol intervals to account for cropped data.
+        
+        Args:
+            protocol: Original protocol object
+            crop_samples: Number of samples cropped from beginning
+            
+        Returns:
+            New protocol object with adjusted intervals
+        """
+        # Convert crop_samples to time units using sampling frequency
+        crop_time = crop_samples / fs
+        
+        # Create new intervals with adjusted timing
+        new_intervals = []
+        for start_time, end_time, label in protocol.intervals:
+            # Adjust times by subtracting crop_time
+            new_start = start_time - crop_time
+            new_end = end_time - crop_time
+            
+            # Only keep intervals that are still within the valid time range
+            if new_end > 0:  # Interval ends after the cropped start
+                # Clamp start time to 0 if it goes negative
+                clamped_start = max(0, new_start)
+                new_intervals.append((clamped_start, new_end, label))
+        
+        # Create new protocol with adjusted intervals
+        from lys.objects.protocol import Protocol
+        return Protocol(intervals=new_intervals)

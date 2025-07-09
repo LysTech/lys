@@ -8,7 +8,7 @@ from lys.processing.pipeline import ProcessingPipeline
 
 experiment_name = "fnirs_8classes"
 experiment = create_experiment(experiment_name, "nirs")
-experiment.sessions = experiment.sessions[0:1]
+#experiment.sessions = experiment.sessions[0:1]
 
 
 if False:
@@ -41,12 +41,22 @@ experiment = processing_pipeline.apply(experiment)
 
 """ Check correlations """
 from lys.utils.mri_tstat import get_mri_tstats 
+tstat_firsts = []
 for session in experiment.sessions:
     for task in session.protocol.tasks:
         print(f"Task: {task}")
         reconstructed_tstats = session.processed_data["t_HbO_reconstructed"][task]
         mri_tstats = get_mri_tstats(session.patient.name, task)
         corr = np.corrcoef(reconstructed_tstats, mri_tstats)[0, 1]
+        tstat_firsts.append(corr)
         print(f"Correlation: {corr}")
 
-    
+
+avg_score = np.mean(tstat_firsts)
+min_score = np.min(tstat_firsts)
+max_score = np.max(tstat_firsts)
+
+print(f"Average fMRI–fNIRS (tstat-first) correlation across all tasks: {avg_score * 100:.2f}%")
+print(f"Minimum fMRI–fNIRS correlation: {min_score * 100:.2f}%")
+print(f"Maximum fMRI–fNIRS correlation: {max_score * 100:.2f}%")
+
