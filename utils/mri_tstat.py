@@ -5,6 +5,48 @@ from typing import Dict, Tuple, Any
 
 from .paths import lys_data_dir
 
+def get_mri_tstats(patient_name: str, task: str) -> np.ndarray:
+    """
+    Get MRI t-stats for a specific patient and task.
+    
+    Args:
+        patient_name: Patient identifier (e.g., 'P03')
+        task: Task name (e.g., 'MT', 'SN')
+        
+    Returns:
+        Array of t-stats for the specified task
+        
+    Raises:
+        FileNotFoundError: If the SMP file doesn't exist
+        KeyError: If the task is not found in the SMP file
+    """
+    smp_file_path = _get_smp_file_path(patient_name)
+    smp_header, tstat_data = _read_smp_file(smp_file_path)
+    task_map = _create_task_map(smp_header, tstat_data)
+    
+    if task not in task_map:
+        available_tasks = list(task_map.keys())
+        raise KeyError(f"Task '{task}' not found. Available tasks: {available_tasks}")
+    
+    return task_map[task]
+
+
+def get_all_mri_tstats(patient_name: str) -> Dict[str, np.ndarray]:
+    """
+    Get all MRI t-stats for a specific patient.
+    
+    Args:
+        patient_name: Patient identifier (e.g., 'P03')
+        
+    Returns:
+        Dictionary mapping task names to t-stat arrays
+        
+    Raises:
+        FileNotFoundError: If the SMP file doesn't exist
+    """
+    smp_file_path = _get_smp_file_path(patient_name)
+    smp_header, tstat_data = _read_smp_file(smp_file_path)
+    return _create_task_map(smp_header, tstat_data)
 
 def _parse_task_name(task_name: str) -> str:
     """
@@ -69,46 +111,3 @@ def _create_task_map(smp_header: Dict[str, Any], tstat_data: np.ndarray) -> Dict
         for ix in range(smp_header['Nr maps'])
     }
 
-
-def get_mri_tstats(patient_name: str, task: str) -> np.ndarray:
-    """
-    Get MRI t-stats for a specific patient and task.
-    
-    Args:
-        patient_name: Patient identifier (e.g., 'P03')
-        task: Task name (e.g., 'MT', 'SN')
-        
-    Returns:
-        Array of t-stats for the specified task
-        
-    Raises:
-        FileNotFoundError: If the SMP file doesn't exist
-        KeyError: If the task is not found in the SMP file
-    """
-    smp_file_path = _get_smp_file_path(patient_name)
-    smp_header, tstat_data = _read_smp_file(smp_file_path)
-    task_map = _create_task_map(smp_header, tstat_data)
-    
-    if task not in task_map:
-        available_tasks = list(task_map.keys())
-        raise KeyError(f"Task '{task}' not found. Available tasks: {available_tasks}")
-    
-    return task_map[task]
-
-
-def get_all_mri_tstats(patient_name: str) -> Dict[str, np.ndarray]:
-    """
-    Get all MRI t-stats for a specific patient.
-    
-    Args:
-        patient_name: Patient identifier (e.g., 'P03')
-        
-    Returns:
-        Dictionary mapping task names to t-stat arrays
-        
-    Raises:
-        FileNotFoundError: If the SMP file doesn't exist
-    """
-    smp_file_path = _get_smp_file_path(patient_name)
-    smp_header, tstat_data = _read_smp_file(smp_file_path)
-    return _create_task_map(smp_header, tstat_data)

@@ -8,22 +8,23 @@ from lys.processing.pipeline import ProcessingPipeline
 
 experiment_name = "fnirs_8classes"
 experiment = create_experiment(experiment_name, "nirs")
-experiment = experiment.filter_by_subjects(["P03"])
+experiment.sessions = experiment.sessions[0:1]
 
 
-""" Check mesh and volume alignmnent """
-mesh = experiment.sessions[0].patient.mesh
-segmentation = experiment.sessions[0].patient.segmentation
-scene = VTKScene(title="Mesh and segmentation alignment")
-# See how our alignment is not perfect :( !! 
-scene.add(mesh).add(segmentation).format(segmentation, opacity=0.02).show()
+if False:
+    """ Check mesh and volume alignmnent """
+    mesh = experiment.sessions[0].patient.mesh
+    segmentation = experiment.sessions[0].patient.segmentation
+    scene = VTKScene(title="Mesh and segmentation alignment")
+    # See how our alignment is not perfect :( !! 
+    scene.add(mesh).add(segmentation).format(segmentation, opacity=0.02).show()
 
-""" Check projected Jacobian """
-scene = VTKScene(title="Projected Jacobian")
-sd_vertex_jacobian_wl1 = experiment.sessions[0].jacobians[0].sample_at_vertices(mesh.vertices)
-vertex_jacobian_wl1 = jacobian_to_vertex_val(sd_vertex_jacobian_wl1)
-sd_mesh = StaticMeshData(mesh, vertex_jacobian_wl1)
-scene.add(sd_mesh).add(segmentation).format(segmentation, opacity=0.02).show()
+    """ Check projected Jacobian """
+    scene = VTKScene(title="Projected Jacobian")
+    sd_vertex_jacobian_wl1 = experiment.sessions[0].jacobians[0].sample_at_vertices(mesh.vertices)
+    vertex_jacobian_wl1 = jacobian_to_vertex_val(sd_vertex_jacobian_wl1)
+    sd_mesh = StaticMeshData(mesh, vertex_jacobian_wl1)
+    scene.add(sd_mesh).add(segmentation).format(segmentation, opacity=0.02).show()
 
 
 config = [
@@ -31,7 +32,7 @@ config = [
     {"ConvertODtoHbOandHbR": {}},
     {"RemoveScalpEffect": {}},
     {"ConvertToTStats": {}},
-    {"ReconstructWithEigenmodes": {"num_eigenmodes": 390}}
+    {"ReconstructDual": {"num_eigenmodes": 390}}
 ]
 
 processing_pipeline = ProcessingPipeline(config)
