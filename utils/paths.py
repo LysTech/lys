@@ -22,7 +22,7 @@ def extract_patient_from_path(path: Path) -> str:
     Extracts the patient string (e.g., 'P03') from a Path object by searching for a part matching the pattern 'P' followed by digits.
     Raises ValueError if no such part is found.
     """
-    for part in str(path).split("/"):
+    for part in path.parts:
         match = re.fullmatch(r"P\d+", part)
         if match:
             return match.group(0)
