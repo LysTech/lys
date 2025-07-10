@@ -287,8 +287,10 @@ def jacobian_to_vertex_val(J_vert: np.ndarray, mode: str = 'fro') -> np.ndarray:
         ValueError: If mode is not 'fro' or 'max'.
     """
     if mode == 'fro':
-        return np.linalg.norm(J_vert, axis=(0, 1))
+        return np.linalg.norm(J_vert, axis=(1, 2))
     elif mode == 'max':
-        return np.abs(J_vert).max(axis=(0, 1))
+        return np.abs(J_vert).max(axis=(1, 2))
+    elif mode == "sum":
+        return np.sum(J_vert, axis = (1, 2))
     else:
         raise ValueError(f"Invalid mode '{mode}'. Must be 'fro' or 'max'.")

@@ -1,6 +1,11 @@
 from lys.objects.experiment import create_experiment
+from lys.processing.preprocessing import RawSessionPreProcessor
+from lys.objects.session import get_session_paths
 
-experiment_name = "fnirs_8classes"
+paths = get_session_paths("8classes", "nirs")
+for path in paths:
+    RawSessionPreProcessor.preprocess(path)
+experiment_name = "8classes"
 experiment = create_experiment(experiment_name, "nirs")
 experiment = experiment.filter_by_subjects(["P03"])
 

@@ -6,25 +6,25 @@ from lys.objects.mesh import StaticMeshData
 from lys.objects.jacobian import jacobian_to_vertex_val
 from lys.processing.pipeline import ProcessingPipeline
 
-experiment_name = "fnirs_8classes"
+experiment_name = "8classes"
 experiment = create_experiment(experiment_name, "nirs")
-#experiment.sessions = experiment.sessions[0:1]
+experiment.sessions = experiment.sessions[0:1]
 
 
-if False:
-    """ Check mesh and volume alignmnent """
-    mesh = experiment.sessions[0].patient.mesh
-    segmentation = experiment.sessions[0].patient.segmentation
-    scene = VTKScene(title="Mesh and segmentation alignment")
-    # See how our alignment is not perfect :( !! 
-    scene.add(mesh).add(segmentation).format(segmentation, opacity=0.02).show()
+#if False:
+""" Check mesh and volume alignmnent """
+mesh = experiment.sessions[0].patient.mesh
+segmentation = experiment.sessions[0].patient.segmentation
+scene = VTKScene(title="Mesh and segmentation alignment")
+# See how our alignment is not perfect :( !!
+scene.add(mesh).add(segmentation).format(segmentation, opacity=0.02).show()
 
-    """ Check projected Jacobian """
-    scene = VTKScene(title="Projected Jacobian")
-    sd_vertex_jacobian_wl1 = experiment.sessions[0].jacobians[0].sample_at_vertices(mesh.vertices)
-    vertex_jacobian_wl1 = jacobian_to_vertex_val(sd_vertex_jacobian_wl1)
-    sd_mesh = StaticMeshData(mesh, vertex_jacobian_wl1)
-    scene.add(sd_mesh).add(segmentation).format(segmentation, opacity=0.02).show()
+""" Check projected Jacobian """
+scene = VTKScene(title="Projected Jacobian")
+sd_vertex_jacobian_wl1 = experiment.sessions[0].jacobians[0].sample_at_vertices(mesh.vertices)
+vertex_jacobian_wl1 = jacobian_to_vertex_val(sd_vertex_jacobian_wl1, mode = "sum")
+sd_mesh = StaticMeshData(mesh, np.sqrt(vertex_jacobian_wl1))
+scene.add(sd_mesh).add(segmentation).format(segmentation, opacity=0.02).show()
 
 
 config = [
@@ -32,6 +32,9 @@ config = [
     {"ConvertODtoHbOandHbR": {}},
     {"RemoveScalpEffect": {}},
     {"ConvertToTStats": {}},
+    {"HemoToOD":{}},
+#    {"Zscore":{}},
+#    {"ConvertToTStats": {}},
     {"ReconstructDual": {"num_eigenmodes": 390}}
 ]
 
@@ -40,7 +43,7 @@ experiment = processing_pipeline.apply(experiment)
 
 
 """ Check correlations """
-from lys.utils.mri_tstat import get_mri_tstats 
+from lys.utils.mri_tstat import get_mri_tstats
 tstat_firsts = []
 for session in experiment.sessions:
     for task in session.protocol.tasks:

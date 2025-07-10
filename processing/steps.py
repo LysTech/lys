@@ -74,8 +74,8 @@ class ReconstructDual(ProcessingStep):
         Bmn_wl2 = self.compute_Bmn(vertex_jacobian_wl2, phi)
 
         # Get t-stat data
-        t_HbO_data = session.processed_data["t_HbO"]
-        t_HbR_data = session.processed_data["t_HbR"]
+        t_HbO_data = session.processed_data["wl1"]
+        t_HbR_data = session.processed_data["wl2"]
         
         # Initialize reconstructed data dictionaries
         session.processed_data["t_HbO_reconstructed"] = {}
@@ -108,8 +108,8 @@ class ReconstructDual(ProcessingStep):
             session.processed_data["t_HbR_reconstructed"][task] = reconstructed_HbO  # Note: reconstruct_dual only returns HbO
         
         # Clean up intermediate data
-        del session.processed_data["t_HbO"]
-        del session.processed_data["t_HbR"]
+        del session.processed_data["wl1"]
+        del session.processed_data["wl1"]
 
     def get_best_reg_param_dual(self, Bmn_wl1, Bmn_wl2, y_sd, y_sd_HbR, phi, eigenvals, vertices, fmri_tstats):
         """
@@ -630,6 +630,42 @@ class RemoveScalpEffect(ProcessingStep):
 
         return idx_start, idx_end
 
+class HemoToOD(ProcessingStep):
+    def hemo_to_od(self,
+            HbO,
+            HbR,
+    ):
+        T = len(HbO)
+        HbO = np.reshape(HbO, (T,num_sources,num_detectors))
+        HbR = np.reshape(HbR, (T, num_sources, num_detectors))
+        S = num_sources
+        D = num_detectors
+        od_wl1 = np.zeros((T, S, D))
+        od_wl2 = np.zeros((T, S, D))
+        for t in range(T):
+            for s_idx in range(S):
+                for d_idx in range(D):
+                    hemo_vec = np.array([HbO[t, s_idx, d_idx], HbR[t, s_idx, d_idx]])
+                    od_vec = A.dot(hemo_vec)
+                    od_wl1[t, s_idx, d_idx] = od_vec[0]
+                    od_wl2[t, s_idx, d_idx] = od_vec[1]
+
+        return od_wl1, od_wl2
+
+    def _do_process(self, session: 'Session') -> None:
+        HbO = session.processed_data["t_HbO"]
+        HbR = session.processed_data["t_HbR"]
+        od_wl1, od_wl2 = self.hemo_to_od(HbO,HbR)
+        session.processed_data["wl1"] = od_wl1
+        session.processed_data["wl2"] = od_wl2
+        del session.processed_data["t_HbO"]
+        del session.processed_data["t_HbR"]
+
+
+# class Zscore(ProcessingStep):
+#     def _do_process(self, session: 'Session') -> None:
+#         processed_data = session.processed_data("HbO)
+#         processed_data = processed_data - np.mean(processed_data)
 
 class BandpassFilter(ProcessingStep):
     """
