@@ -10,7 +10,7 @@ experiment_name = "8classes"
 experiment = create_experiment(experiment_name, "nirs")
 experiment.sessions = experiment.sessions[0:1]
 
-#
+##
 #if False:
 """ Check mesh and volume alignmnent """
 mesh = experiment.sessions[0].patient.mesh
