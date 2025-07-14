@@ -372,32 +372,18 @@ The MATLAB file should contain:
 
 Each eigenmode is represented as an `Eigenmode` object, which is a subclass of `np.ndarray` with an additional `eigenvalue` attribute. This allows you to work with eigenmode values as regular numpy arrays while maintaining access to the associated eigenvalue.
 
-## Data Folder Structure
 
-Your data directory should be organized as follows:
+## Notes on recording perceived speech data
+
+We use [audible-cli](https://github.com/mkb79/audible-cli) to download audiobooks, and whisper to transcribe them with word-level timestamps. Claude estimates this to have ~20ms accuracy which is good enough for NIRS/EEG.
+
+Example download and conversion to `.mp3` of a book:
 
 ```
-subject/
-├── anat/
-│   ├── volumes/
-│   │   ├── MRI/
-│   │   └── segmentations/
-│   └── meshes/
-├── derivatives/
-│   └── jacobians/
-│       └── sub-001_jacobian.h5  # Actual file stored once
-└── nirs/
-    └── experiment/
-        ├── session1/
-        │   ├── (symlink) sub-001_jacobian.h5 -> ../../derivatives/jacobians/sub-001_jacobian.h5 
-        │   ├── sub-001_optodes.some_format
-        │   ├── data.snirf
-        │   ├── protocol.prt
-        │   └── processed_session1_v1
-        └── session2/
-            ├── (symlink) sub-001_jacobian.h5 -> ../../derivatives/jacobians/sub-001_jacobian.h5
-            ├── sub-001_optodes.some_format
-            ├── data.snirf
-            └── protocol.prt
+audible library list
+audible download --asin 0141987162 --output-dir ./audiobooks/ --aax
+audible activation-bytes #this gives some number, here "7935c812"
+ffmpeg -activation_bytes 7935c812 -i "./audiobooks/Churchill_Walking_with_Destiny-LC_64_22050_stereo.aax" -c:a libmp3lame "./audiobooks/churchill.mp3" #converts .aax file to .mp3
 ```
 
+Then this book needs to be transcribed so that each word is timestamped. The `transcribe_mp3_to_json` function in `data_recording/perceived_speech.py` does the timestamping.

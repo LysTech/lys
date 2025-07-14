@@ -6,6 +6,8 @@ for the lys library. These interfaces establish contracts that concrete
 implementations must follow.
 """
 
+#TODO: rename this folder to abstract_interfaces for clarity
+
 from lys.interfaces.plottable import Plottable
 from lys.interfaces.processing_step import ProcessingStep
 from lys.interfaces.session_adapters import ISessionAdapter
