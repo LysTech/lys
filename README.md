@@ -386,4 +386,4 @@ audible activation-bytes #this gives some number, here "7935c812"
 ffmpeg -activation_bytes 7935c812 -i "./audiobooks/Churchill_Walking_with_Destiny-LC_64_22050_stereo.aax" -c:a libmp3lame "./audiobooks/churchill.mp3" #converts .aax file to .mp3
 ```
 
-Then this book needs to be transcribed so that each word is timestamped. The `transcribe_mp3_to_json` function in `data_recording/perceived_speech.py` does the timestamping.
+Then this book needs to be transcribed so that each word is timestamped. We do this with [whisper.cpp](https://github.com/ggml-org/whisper.cpp) for performance. [#TODO: provide a script of how to do this].

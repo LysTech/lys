@@ -7,13 +7,14 @@ from interfaces.event import Event, PauseEvent, ResumeEvent
 from interfaces.task_executor import TaskExecutor
 import time
 from PyQt5.QtWidgets import QWidget, QPushButton, QHBoxLayout, QApplication
-from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
-from PyQt5.QtCore import QUrl, QTimer
+from PyQt5.QtCore import QTimer, pyqtSignal
 import sys
 import queue
-import threading
+import sounddevice as sd
+import soundfile as sf
 from PyQt5.QtWidgets import QLabel
-import pygame
+import numpy as np
+
 
 class PerceivedWordEvent(Event):
     """Event representing a perceived word during audio playback."""
@@ -32,67 +33,10 @@ class PerceivedWordEvent(Event):
             "confidence": self.confidence
         }
 
-def transcribe_mp3_to_json(
-    audio_path: Path,
-    output_file: Path,
-    model_size: str = "base",
-    language: str = "en"
-) -> List[Dict[str, Any]]:
-    """
-    Transcribe an MP3 file to JSON with word-level timestamps using Whisper.
-
-    Args:
-        audio_path (Path): Path to the input MP3 file.
-        output_file (Path): Path to the output JSON file.
-        model_size (str): Whisper model size (e.g., 'base', 'large-v2').
-        language (str): Language code for transcription.
-
-    Returns:
-        List[Dict[str, Any]]: List of word-level timing dictionaries.
-    """
-    print(f"Loading Whisper model '{model_size}'...")
-    model = whisper.load_model(model_size)
-
-    print(f"Transcribing {audio_path}...")
-    result = model.transcribe(
-        str(audio_path),
-        word_timestamps=True,
-        language=language
-    )
-
-    words_with_timing = []
-    for segment in result.get("segments", []):
-        for word_info in segment.get("words", []):
-            words_with_timing.append({
-                "word": word_info["word"].strip(),
-                "start_ms": int(word_info["start"] * 1000),
-                "end_ms": int(word_info["end"] * 1000),
-                "confidence": word_info.get("probability", 1.0)
-            })
-
-    output_data = {
-        "total_words": len(words_with_timing),
-        "duration_seconds": result["segments"][-1]["end"] if result["segments"] else 0,
-        "full_text": result.get("text", ""),
-        "words": words_with_timing
-    }
-
-    # Ensure output directory exists using check_file_exists, create if not
-    output_dir = output_file.parent
-    try:
-        check_file_exists(str(output_dir))
-    except FileNotFoundError:
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-    with output_file.open('w') as f:
-        json.dump(output_data, f, indent=2)
-
-    print(f"Saved timestamps to: {output_file}")
-    return words_with_timing
 
 class AudioPlayerInterface:
     """
-    Interface for an audio player. Concrete implementations (e.g., PyQt5 GUI) should implement these methods.
+    Interface for an audio player. Concrete implementations should implement these methods.
     """
     def play(self):
         raise NotImplementedError
@@ -100,33 +44,57 @@ class AudioPlayerInterface:
         raise NotImplementedError
     def resume(self):
         raise NotImplementedError
+    def stop(self):
+        raise NotImplementedError
     def is_playing(self) -> bool:
         raise NotImplementedError
     def set_on_word_boundary(self, callback):
         """Register a callback for word boundary events."""
         raise NotImplementedError
+    def set_on_pause(self, callback):
+        raise NotImplementedError
+    def set_on_resume(self, callback):
+        raise NotImplementedError
+    def set_on_stop(self, callback):
+        raise NotImplementedError
 
-class PygameAudioPlayer(AudioPlayerInterface, QWidget):
+
+class SoundDeviceAudioPlayer(AudioPlayerInterface, QWidget):
     """
-    Audio player using pygame for playback, with PyQt5 GUI controls and word display.
+    Audio player using sounddevice for reliable, sample-accurate playback,
+    with PyQt5 GUI controls and word display.
     """
+    playbackFinished = pyqtSignal()
+
     def __init__(self, audio_path: Path, transcript_path: Path):
         super().__init__()
         QWidget.__init__(self)
-        print("Loading audio file:", str(audio_path.resolve()))
+
         self.audio_path = audio_path
         self.transcript_path = transcript_path
-        pygame.mixer.init()
-        pygame.mixer.music.load(str(audio_path))
+
+        # Load audio data using soundfile
+        try:
+            self.audio_data, self.samplerate = sf.read(str(audio_path), dtype='float32')
+        except Exception as e:
+            print(f"Error loading audio file: {e}")
+            self.audio_data, self.samplerate = np.array([]), 44100
+
+        self.stream: Optional[sd.OutputStream] = None
+        self.current_frame = 0
+        self.paused = False
+
         self.play_button = QPushButton('Play')
         self.pause_button = QPushButton('Pause')
         self.resume_button = QPushButton('Resume')
         self.stop_button = QPushButton('Stop')
         self.word_label = QLabel('')
+
         self.play_button.clicked.connect(self.play)
         self.pause_button.clicked.connect(self.pause)
         self.resume_button.clicked.connect(self.resume)
         self.stop_button.clicked.connect(self.stop)
+
         layout = QHBoxLayout()
         layout.addWidget(self.play_button)
         layout.addWidget(self.pause_button)
@@ -134,54 +102,172 @@ class PygameAudioPlayer(AudioPlayerInterface, QWidget):
         layout.addWidget(self.stop_button)
         layout.addWidget(self.word_label)
         self.setLayout(layout)
-        # Load transcript
-        with open(transcript_path, 'r') as f:
-            self.transcript = json.load(f)
-        self.words = self.transcript['words']
+
+        # Connect the finished signal to the main-thread handler
+        self.playbackFinished.connect(self.on_playback_finished_main_thread)
+
+        # Load and parse transcript
+        self.words = self._parse_transcript(transcript_path)
+        if self.words:
+            offset = self.words[0]['start_ms']
+            for word in self.words:
+                word['start_ms'] -= offset
+                word['end_ms'] -= offset
+        
         self.word_index = 0
         self._on_word_boundary = None
         self._on_pause = None
         self._on_resume = None
         self._on_stop = None
+
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._check_word_boundary)
 
+    @staticmethod
+    def _parse_transcript(transcript_path: Path) -> List[Dict[str, Any]]:
+        """
+        Parse a transcript file in the format:
+        [hh:mm:ss.sss --> hh:mm:ss.sss]   word
+        Returns a list of dicts with keys: word, start_ms, end_ms, confidence.
+        """
+        import re
+        def timestamp_to_ms(ts: str) -> int:
+            """Convert a timestamp string hh:mm:ss.sss to milliseconds."""
+            m = re.match(r"(\d+):(\d+):(\d+\.\d+)", ts)
+            if not m:
+                raise ValueError(f"Invalid timestamp format: {ts}")
+            h, m_, s = m.groups()
+            return int(float(h) * 3600000 + float(m_) * 60000 + float(s) * 1000)
+        
+        words = []
+        line_re = re.compile(r"\[(\d{2}:\d{2}:\d{2}\.\d{3}) --> (\d{2}:\d{2}:\d{2}\.\d{3})\]\s+(.*)")
+        try:
+            with open(transcript_path, 'r') as f:
+                for line in f:
+                    match = line_re.match(line.strip())
+                    if match:
+                        start, end, word = match.groups()
+                        if word.strip(): # Only add if word is not empty
+                            words.append({
+                                'word': word.strip(),
+                                'start_ms': timestamp_to_ms(start),
+                                'end_ms': timestamp_to_ms(end),
+                                'confidence': 1.0
+                            })
+        except FileNotFoundError:
+            print(f"Transcript file not found: {transcript_path}")
+        return words
+
+    def audio_callback(self, outdata: np.ndarray, frames: int, time, status: sd.CallbackFlags):
+        """The heart of sounddevice playback, called by the audio thread."""
+        if status:
+            print(status, file=sys.stderr)
+        
+        if self.paused:
+            outdata.fill(0)
+            return
+
+        remaining_frames = len(self.audio_data) - self.current_frame
+        
+        if remaining_frames <= 0:
+            outdata.fill(0)
+            raise sd.CallbackStop
+        
+        valid_frames = min(frames, remaining_frames)
+        chunk = self.audio_data[self.current_frame : self.current_frame + valid_frames]
+        # Ensure chunk is 2D (frames, channels)
+        if chunk.ndim == 1:
+            chunk = chunk[:, np.newaxis]
+        outdata[:valid_frames] = chunk
+        if valid_frames < frames:
+            outdata[valid_frames:] = 0
+
+        self.current_frame += valid_frames
+
+    def on_playback_finished(self):
+        """
+        Called by the sounddevice thread when playback is naturally complete.
+        This method MUST be thread-safe. Do not interact with GUI elements directly.
+        """
+        print("Playback finished callback from audio thread.")
+        self.playbackFinished.emit()
+
+    def on_playback_finished_main_thread(self):
+        """This slot is executed in the main GUI thread and is safe for GUI updates."""
+        print("Playback finished handler in main thread.")
+        self.timer.stop()
+        self.word_index = 0
+        self.current_frame = 0
+        self.word_label.setText('')
+        if self.stream:
+            self.stream.close()
+            self.stream = None
+        if self._on_stop:
+            self._on_stop()
+
     def play(self):
         print("Play pressed")
-        pygame.mixer.music.play()
+        if self.stream:
+            self.stream.close()
+        
+        self.current_frame = 0
+        self.word_index = 0
+
+        try:
+            device_info = sd.query_devices(sd.default.device, 'output')
+            low_latency = device_info['default_low_output_latency']
+        except Exception as e:
+            print(f"Could not query device latency, falling back to 'low': {e}")
+            low_latency = 'low'
+        
+        self.stream = sd.OutputStream(
+            samplerate=self.samplerate,
+            channels=1,
+            callback=self.audio_callback,
+            finished_callback=self.on_playback_finished,
+            latency=low_latency,
+            blocksize=512  # Using a smaller blocksize for lower latency
+        )
+        self.stream.start()
         self.timer.start(10)
-        print("Timer started")
 
     def pause(self):
-        print("Pause pressed")
-        pygame.mixer.music.pause()
-        self.timer.stop()
-        print("Timer stopped")
-        if self._on_pause:
-            self._on_pause()
+        if self.stream and self.stream.active and not self.paused:
+            print("Pause pressed")
+            self.paused = True
+            self.timer.stop()
+            if self._on_pause:
+                self._on_pause()
 
     def resume(self):
-        print("Resume pressed")
-        pygame.mixer.music.unpause()
-        self.timer.start(10)
-        print("Timer started")
-        if self._on_resume:
-            self._on_resume()
+        if self.stream and self.paused:
+            print("Resume pressed")
+            self.paused = False
+            self.timer.start(10)
+            if self._on_resume:
+                self._on_resume()
 
     def stop(self):
         print("Stop pressed")
-        pygame.mixer.music.stop()
+        if self.stream:
+            self.stream.stop()
+            self.stream.close()
+            self.stream = None
         self.timer.stop()
-        print("Timer stopped, word index reset")
+        self.current_frame = 0
         self.word_index = 0
         self.word_label.setText('')
         if self._on_stop:
             self._on_stop()
 
+    def closeEvent(self, event):
+        """Ensure the audio stream is stopped when the window is closed."""
+        print("Closing window, stopping audio stream.")
+        self.stop()
+        event.accept()
+
     def is_playing(self) -> bool:
-        busy = pygame.mixer.music.get_busy()
-        print("is_playing called, busy:", busy)
-        return busy
+        return self.stream is not None and self.stream.active and not self.paused
 
     def set_on_word_boundary(self, callback):
         self._on_word_boundary = callback
@@ -196,19 +282,20 @@ class PygameAudioPlayer(AudioPlayerInterface, QWidget):
         self._on_stop = callback
 
     def _check_word_boundary(self):
-        if self.word_index >= len(self.words):
-            print("All words processed, timer stopped")
-            self.timer.stop()
-            self.word_label.setText('')
+        if not self.is_playing() or not self.words:
             return
-        current_ms = pygame.mixer.music.get_pos()
+
+        if self.word_index >= len(self.words):
+            return
+
+        # Reliable timing based on frames played
+        current_ms = (self.current_frame / self.samplerate) * 1000
+        
         word = self.words[self.word_index]
-        print(f"_check_word_boundary: current_ms={current_ms}, word_start={word['start_ms']}, word={word['word']}")
+        
         if current_ms >= word['start_ms']:
-            print(f"Displaying word: {word['word']}")
             self.word_label.setText(word['word'])
             if self._on_word_boundary:
-                print(f"Calling on_word_boundary callback for word: {word['word']}")
                 self._on_word_boundary(word)
             self.word_index += 1
 
@@ -216,7 +303,7 @@ class PygameAudioPlayer(AudioPlayerInterface, QWidget):
 class PerceivedSpeechTaskExecutor(TaskExecutor):
     """
     TaskExecutor for perceived speech tasks. Streams PerceivedWordEvent, PauseEvent, ResumeEvent, etc. in real time.
-    Integrates with a PyQt5AudioPlayer GUI for real-time control and logging.
+    Integrates with an AudioPlayerInterface GUI for real-time control and logging.
     Uses a thread-safe queue to yield events as they occur.
     """
     def __init__(self, transcript_path: Path, audio_path: Path, gui: Optional[AudioPlayerInterface] = None, log_path: Optional[Path] = None):
@@ -234,17 +321,17 @@ class PerceivedSpeechTaskExecutor(TaskExecutor):
             self.gui.set_on_resume(self.on_resume)
             self.gui.set_on_stop(self.on_stop)
 
-    def log_event(self, event):
+    def log_event(self, event: Event):
         if self.log_file:
             self.log_file.write(json.dumps(event.to_dict()) + "\n")
             self.log_file.flush()
 
-    def on_word(self, word):
+    def on_word(self, word: Dict[str, Any]):
         event = PerceivedWordEvent(
             word=word['word'],
             start_ms=word['start_ms'],
             end_ms=word['end_ms'],
-            confidence=word['confidence']
+            confidence=word.get('confidence', 1.0)
         )
         self.event_queue.put(event)
 
@@ -256,36 +343,49 @@ class PerceivedSpeechTaskExecutor(TaskExecutor):
 
     def on_stop(self):
         self._stopped = True
+        # Ensure the event stream loop terminates
+        self.event_queue.put(None) 
 
-    def event_stream(self, session_path: Path):
+    def event_stream(self, session_path: Path) -> Iterator[Event]:
         """
-        Yield events from the queue as they arrive. Ends when stopped.
+        Yield events from the queue as they arrive. Ends when a stop event is received.
         """
         while not self._stopped:
             try:
                 event = self.event_queue.get(timeout=0.1)
+                if event is None: # Stop signal
+                    break
                 yield event
             except queue.Empty:
                 continue
 
 # --- Main block ---
 if __name__ == "__main__":
-    audio_path = Path("churchill_chapter1.wav")
-    transcript_path = Path("../protocols/churchill_chapter1_timestamps.json")
+    audio_path = Path("churchill_chapter1_16k_mono.wav")
+    transcript_path = Path("transcription.txt")
     log_path = Path("test_log.jsonl")
-    from PyQt5.QtWidgets import QApplication
-    from PyQt5.QtCore import QTimer
+    
     app = QApplication(sys.argv)
-    player = PygameAudioPlayer(audio_path, transcript_path)
+    player = SoundDeviceAudioPlayer(audio_path, transcript_path)
     player.show()
+    
     executor = PerceivedSpeechTaskExecutor(transcript_path, audio_path, gui=player, log_path=log_path)
+    
     def poll_event_stream():
         try:
+            # Non-blocking get to avoid freezing the GUI
             event = executor.event_queue.get_nowait()
+            if event is None:
+                # Proper shutdown
+                QApplication.instance().quit()
+                return
             executor.log_event(event)
         except queue.Empty:
             pass
+
+    # Timer to poll the event queue from the main GUI thread
     poll_timer = QTimer()
     poll_timer.timeout.connect(poll_event_stream)
-    poll_timer.start(50)
+    poll_timer.start(50) # Poll every 50ms
+
     sys.exit(app.exec_())
