@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
 import numpy as np
+import snirf
 
 from lys.interfaces import ISessionAdapter
 
@@ -49,6 +50,7 @@ class RawSessionPreProcessor:
         """
         available_strategies = [
             BettinaSessionAdapter(),
+            Flow2MomentsSessionAdapter(),
             # Add more adapters here as they're implemented
         ]
         
@@ -75,3 +77,73 @@ class BettinaSessionAdapter(ISessionAdapter):
         wl1 = np.loadtxt(wl1_path)
         wl2 = np.loadtxt(wl2_path)
         return {'wl1': wl1, 'wl2': wl2}
+
+
+class Flow2MomentsSessionAdapter(ISessionAdapter):
+    """
+    Adapter for Kernel Flow2 .snirf files from the 'Moments' pipeline.
+    
+    This adapter extracts intensity, mean time of flight, and variance from the
+    SNIRF file.
+    """
+    def can_handle(self, session_path: Path) -> bool:
+        """Check if this session contains a .snirf file."""
+        assert session_path.is_dir()
+        return any(f.name.endswith("_MOMENTS.snirf") for f in session_path.iterdir() if f.is_file())
+
+    def extract_data(self, session_path: Path) -> dict:
+        """
+        Extracts data from a .snirf file and returns a dictionary with:
+        - 'data': np.ndarray of shape (n_timepoints, n_channels, n_wavelengths, 3)
+        - 'channels': list of (source, detector) tuples
+        - 'wavelengths': list of wavelength indices
+        - 'moment_names': ['amplitude', 'mean_time_of_flight', 'variance']
+        - 'time': time vector (n_timepoints,)
+        """
+        snirf_path = next(session_path.glob('*_MOMENTS.snirf'))
+        snirf_data = snirf.Snirf(str(snirf_path), 'r')
+        nirs_data_block = snirf_data.nirs[0].data[0]
+        mlist = nirs_data_block.measurementList
+        n_timepoints = nirs_data_block.dataTimeSeries.shape[0]
+
+        # 1. Build unique channel and wavelength lists
+        channel_tuples = sorted(set((m.sourceIndex, m.detectorIndex) for m in mlist))
+        wavelength_indices = sorted(set(getattr(m, 'wavelengthIndex', 1) for m in mlist))
+        channel_index = {ch: i for i, ch in enumerate(channel_tuples)}
+        wavelength_index = {w: i for i, w in enumerate(wavelength_indices)}
+
+        # 2. Map dataTypeIndex/dataUnit to moment index
+        moment_map = {
+            (2, ''): 0,        # amplitude
+            (1, 'ps'): 1,      # mean time of flight
+            (3, 'ps^2'): 2     # variance
+        }
+        moment_names = ['amplitude', 'mean_time_of_flight', 'variance']
+
+        n_channels = len(channel_tuples)
+        n_wavelengths = len(wavelength_indices)
+        n_moments = 3
+
+        # 3. Allocate output array
+        data = np.full((n_timepoints, n_channels, n_wavelengths, n_moments), np.nan)
+
+        # 4. Fill array
+        for col, m in enumerate(mlist):
+            ch = (m.sourceIndex, m.detectorIndex)
+            w = getattr(m, 'wavelengthIndex', 1)
+            dtype_idx = getattr(m, 'dataTypeIndex', None)
+            dunit = getattr(m, 'dataUnit', '')
+            if isinstance(dtype_idx, int):
+                moment_idx = moment_map.get((dtype_idx, dunit))
+                if moment_idx is not None:
+                    cidx = channel_index[ch]
+                    widx = wavelength_index[w]
+                    data[:, cidx, widx, moment_idx] = nirs_data_block.dataTimeSeries[:, col]
+
+        return {
+            'data': data,
+            'channels': channel_tuples,
+            'wavelengths': wavelength_indices,
+            'moment_names': moment_names,
+            'time': nirs_data_block.time
+        }
