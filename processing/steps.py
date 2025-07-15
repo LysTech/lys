@@ -294,13 +294,81 @@ class ReconstructDual(ProcessingStep):
         return Bmn
 
 
+
 class ReconstructDualWithoutBadChannels(ProcessingStep):
     """
     Dual‐wavelength eigenmode reconstruction that first drops any flat/noisy
     channels flagged in session.processed_data["bad_channels"].
     """
-    def __init__(self, num_eigenmodes: int):
-        self.num_eigenmodes = num_eigenmodes
+    def __init__(self, num_eigenmodes: int,
+                 lambda_selection: str = "lcurve"):   # "lcurve"  or  "corr"
+        self.num_eigenmodes   = num_eigenmodes
+        self.lambda_selection = lambda_selection      # ← new
+
+    # ------------------------------------------------------------------
+    # Pick parameter that maximizes correlation with fMRI
+    # ------------------------------------------------------------------
+    def _find_best_lambda_corr(self, B1, B2, y1, y2,
+                               phi, eigvals, verts, fmri, bad):
+        params  = np.logspace(-5, 5, 65)
+        best_r, best_lam = -np.inf, params[0]
+        for lam in params:
+            X = self._reconstruct(B1, B2, y1, y2, phi, lam, eigvals,
+                                  bad_channels=bad)
+            r = np.corrcoef(X, fmri)[0, 1]
+            if r > best_r:
+                best_r, best_lam = r, lam
+        return best_lam
+
+    # ------------------------------------------------------------------
+    # NEW L‑curve picker (helpers embedded for brevity)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _curv(xm, x, xp, ym, y, yp):
+        dx1, dx2 = x - xm, xp - x;  dy1, dy2 = y - ym, yp - y
+        dx = .5*(dx1+dx2);  dy = .5*(dy1+dy2)
+        ddx = dx2 - dx1;    ddy = dy2 - dy1
+        return abs(ddx*dy - ddy*dx) / ((dx*dx+dy*dy)**1.5 + 1e-12)
+
+    def _find_best_lambda_lcurve(self, B1, B2, y1, y2,
+                                 phi, eigvals, verts, fmri, bad):
+        # build dual system once (same as in _reconstruct)
+        εO1, εR1, εO2, εR2 = 586, 1548.52, 1058, 691.32
+        M1 = np.hstack((εO1*B1, εR1*B1));  M2 = np.hstack((εO2*B2, εR2*B2))
+        B  = np.vstack((M1, M2))
+        y  = np.concatenate((y1.flatten(order='F'), y2.flatten(order='F')))
+        if bad:                              # drop rows for bad channels twice
+            m      = B1.shape[0]
+            mask   = np.ones(B.shape[0], bool)
+            mask[bad] = False;  mask[m+np.array(bad)] = False
+            B, y  = B[mask], y[mask]
+
+        Λ = np.diag(np.tile(eigvals, 2))
+        n = eigvals.size; I = np.eye(n); rho, mu = -0.6, 0.1
+        C = mu*np.block([[I, -rho*I], [-rho*I, rho**2*I]])
+
+        lam_grid = np.logspace(-5, 5, 65)
+        res, sol = [], []
+        for lam in lam_grid:
+            A   = B.T@B + lam*Λ + C
+            α   = np.linalg.solve(A, B.T@y)
+            res.append(np.linalg.norm(B@α - y))
+            sol.append(np.linalg.norm(np.sqrt(Λ)@α))
+
+        log_r, log_s = np.log10(res), np.log10(sol)
+        curv = [0]+[self._curv(log_r[i-1],log_r[i],log_r[i+1],
+                               log_s[i-1],log_s[i],log_s[i+1])
+                    for i in range(1,len(lam_grid)-1)]+[0]
+        return float(lam_grid[int(np.argmax(curv))])
+
+    # ------------------------------------------------------------------
+    # choose picker based on user flag
+    # ------------------------------------------------------------------
+    def _find_best_lambda(self, *args, **kw):
+        pick = self._find_best_lambda_lcurve if self.lambda_selection=="lcurve" \
+               else self._find_best_lambda_corr
+        return pick(*args, **kw)
+
 
     def _do_process(self, session: "Session") -> None:
         # --- 1) load mesh + eigenmodes ---
@@ -357,22 +425,6 @@ class ReconstructDualWithoutBadChannels(ProcessingStep):
         S, D, M = B.shape
         return B.reshape(S * D, M, order="F")
 
-    def _find_best_lambda(self, B1, B2, y1, y2, phi, eigvals, verts, fmri, bad):
-        """
-        Sweep λ to maximize corr of fNIRS vs fMRI after dropping bad channels.
-        """
-        params = np.logspace(-5, 5, 65)
-        best_r, best_lam = -np.inf, params[0]
-        for lam in params:
-            X = self._reconstruct(
-                B1, B2, y1, y2, phi, lam, eigvals,
-                bad_channels=bad
-            )
-            fn = np.array([X[i] for i in range(len(verts))])
-            r = np.corrcoef(fn, fmri)[0, 1]
-            if r > best_r:
-                best_r, best_lam = r, lam
-        return best_lam
 
     def _reconstruct(self,
                      B1, B2,
@@ -478,7 +530,7 @@ class ConvertToTStats(ProcessingStep):
         # 2) For each channel, run AR(1)+IRLS and compute t-stats
         for ch in range(n_channels):
             y_o = HbO[:, ch]
-            y_r = HbR[:, ch]
+            y_r = -HbR[:, ch] #-HbR should be fitted by HbO's response function
             
             # Fit and get (beta, tvals) for oxy
             _beta_o, tvals_o = self._glm_single_channel_tstats(
