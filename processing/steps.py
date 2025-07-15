@@ -2,7 +2,8 @@ import numpy as np
 from scipy import signal
 from sklearn.decomposition import PCA
 from scipy import stats
-
+from scipy.signal import convolve
+from scipy.stats import gamma
 from lys.objects import Session
 from lys.interfaces.processing_step import ProcessingStep
 
@@ -22,8 +23,73 @@ A_inv = np.linalg.inv(A)
 num_sources = 16 #TODO: correct thing would be to have this be a property of session (perhaps session has all hardware info?)
 num_detectors = 24
 
-#Vertex jacobian should have shape (num_vertices, num_sources, num_detectors) (or some transpose of that)
-#num sources: 16, num detectors: 24
+def canonical_double_gamma_hrf(tr=1.0, duration=30.0):
+    times = np.arange(0, duration, tr)
+    peak1, peak2 = 4, 14
+    ratio = 1/6
+
+    hrf1 = gamma.pdf(times, peak1)
+    hrf2 = gamma.pdf(times, peak2)
+    hrf = hrf1 - ratio * hrf2
+    return hrf
+
+def detect_bad_channels(raw_wl1: np.ndarray,
+                        raw_wl2: np.ndarray,
+                        cv_high_thresh: float = 0.15,
+                        cv_low_thresh: float  = 0.001
+                        ) -> list[int]:
+    """
+    Identify bad source–detector channels based on coefficient of variation
+    in the *raw* wavelength intensities.
+
+    Parameters
+    ----------
+    raw_wl1, raw_wl2 : ndarray
+        Either shape (T, S, D) or shape (T, S*D).
+    cv_high_thresh : float
+        Channels with CV above this are marked bad (too noisy).
+    cv_low_thresh : float
+        Channels with CV below this are marked bad (flat).
+
+    Returns
+    -------
+    bad_channels : list of int
+        Flat channel indices 0..(S*D-1) to drop.
+    """
+    # flatten time × channel
+    if raw_wl1.ndim == 3:
+        T, S, D = raw_wl1.shape
+        flat1 = raw_wl1.reshape(T, S * D)
+        flat2 = raw_wl2.reshape(T, S * D)
+    elif raw_wl1.ndim == 2:
+        flat1, flat2 = raw_wl1, raw_wl2
+    else:
+        raise ValueError(f"Unsupported raw shape {raw_wl1.shape}")
+
+    m1 = flat1.mean(axis=0)
+    s1 = flat1.std(axis=0)
+    m2 = flat2.mean(axis=0)
+    s2 = flat2.std(axis=0)
+
+    cv1 = s1 / np.where(m1 == 0, np.finfo(float).eps, m1)
+    cv2 = s2 / np.where(m2 == 0, np.finfo(float).eps, m2)
+
+    bad_mask = (cv1 > cv_high_thresh) | (cv2 > cv_high_thresh) \
+            | (cv1 < cv_low_thresh)  | (cv2 < cv_low_thresh)
+
+    return np.where(bad_mask)[0].tolist()
+
+
+class DetectBadChannels(ProcessingStep):
+    """
+    Compute bad_channels from the *raw* wl1/wl2 and stash them
+    so downstream steps can drop them.
+    Must run *before* ConvertWavelengthsToOD!
+    """
+    def _do_process(self, session: Session) -> None:
+        raw1 = session.processed_data["wl1"]
+        raw2 = session.processed_data["wl2"]
+        session.processed_data["bad_channels"] = detect_bad_channels(raw1, raw2)
 
 
 class ReconstructDual(ProcessingStep):
@@ -74,8 +140,8 @@ class ReconstructDual(ProcessingStep):
         Bmn_wl2 = self.compute_Bmn(vertex_jacobian_wl2, phi)
 
         # Get t-stat data
-        t_HbO_data = session.processed_data["wl1"]
-        t_HbR_data = session.processed_data["wl2"]
+        t_HbO_data = session.processed_data["t_HbO"]
+        t_HbR_data = session.processed_data["t_HbR"]
         
         # Initialize reconstructed data dictionaries
         session.processed_data["t_HbO_reconstructed"] = {}
@@ -108,8 +174,10 @@ class ReconstructDual(ProcessingStep):
             session.processed_data["t_HbR_reconstructed"][task] = reconstructed_HbO  # Note: reconstruct_dual only returns HbO
         
         # Clean up intermediate data
-        del session.processed_data["wl1"]
-        del session.processed_data["wl1"]
+        del session.processed_data["t_HbO"]
+        del session.processed_data["t_HbR"]
+
+
 
     def get_best_reg_param_dual(self, Bmn_wl1, Bmn_wl2, y_sd, y_sd_HbR, phi, eigenvals, vertices, fmri_tstats):
         """
@@ -224,6 +292,127 @@ class ReconstructDual(ProcessingStep):
         S, D, M = B_sdm.shape
         Bmn = B_sdm.reshape(S * D, M, order='F')
         return Bmn
+
+
+class ReconstructDualWithoutBadChannels(ProcessingStep):
+    """
+    Dual‐wavelength eigenmode reconstruction that first drops any flat/noisy
+    channels flagged in session.processed_data["bad_channels"].
+    """
+    def __init__(self, num_eigenmodes: int):
+        self.num_eigenmodes = num_eigenmodes
+
+    def _do_process(self, session: "Session") -> None:
+        # --- 1) load mesh + eigenmodes ---
+        verts = session.patient.mesh.vertices
+        if session.patient.mesh.eigenmodes is None:
+            raise ValueError("Mesh has no eigenmodes.")
+        start, end = 2, 2 + self.num_eigenmodes
+        # stack then transpose → (n_vertices, M)
+        phi = np.vstack(session.patient.mesh.eigenmodes[start:end]).T
+        eigvals = np.array([e.eigenvalue for e in session.patient.mesh.eigenmodes[start:end]])
+        eigvals[0] = 0.0
+
+        # --- 2) sample Jacobians + build Bmn blocks ---
+        vj1 = session.jacobians[0].sample_at_vertices(verts)
+        vj2 = session.jacobians[1].sample_at_vertices(verts)
+        B1 = self._compute_Bmn(vj1, phi)
+        B2 = self._compute_Bmn(vj2, phi)
+
+        # --- 3) grab bad_channels (must have run DetectBadChannels first) ---
+        bad = session.processed_data.get("bad_channels", [])
+
+        # --- 4) iterate tasks ---
+        tO = session.processed_data["t_HbO"]
+        tR = session.processed_data["t_HbR"]
+        session.processed_data["t_HbO_reconstructed"] = {}
+        session.processed_data["t_HbR_reconstructed"] = {}
+
+        from lys.utils.mri_tstat import get_mri_tstats
+        for task in session.protocol.tasks:
+            y1 = tO[task]
+            y2 = tR[task]
+            fmri = get_mri_tstats(session.patient.name, task)
+
+            lam = self._find_best_lambda(B1, B2, y1, y2, phi, eigvals, verts, fmri, bad)
+            print(f"  Optimal regularization parameter: {lam:.6f}\n")
+            rec = self._reconstruct(
+                B1, B2, y1, y2, phi, lam, eigvals,
+                bad_channels=bad
+            )
+
+            session.processed_data["t_HbO_reconstructed"][task] = rec
+            session.processed_data["t_HbR_reconstructed"][task] = rec
+
+        # cleanup
+        del session.processed_data["t_HbO"]
+        del session.processed_data["t_HbR"]
+
+    def _compute_Bmn(self, vj: np.ndarray, phi: np.ndarray) -> np.ndarray:
+        """
+        Contract Jacobian (N_vertices, S, D) with phi (N_vertices, M)
+        → Bmn (S*D, M) in Fortran order.
+        """
+        B = np.einsum("nsd,nm->sdm", vj, phi)
+        S, D, M = B.shape
+        return B.reshape(S * D, M, order="F")
+
+    def _find_best_lambda(self, B1, B2, y1, y2, phi, eigvals, verts, fmri, bad):
+        """
+        Sweep λ to maximize corr of fNIRS vs fMRI after dropping bad channels.
+        """
+        params = np.logspace(-5, 5, 65)
+        best_r, best_lam = -np.inf, params[0]
+        for lam in params:
+            X = self._reconstruct(
+                B1, B2, y1, y2, phi, lam, eigvals,
+                bad_channels=bad
+            )
+            fn = np.array([X[i] for i in range(len(verts))])
+            r = np.corrcoef(fn, fmri)[0, 1]
+            if r > best_r:
+                best_r, best_lam = r, lam
+        return best_lam
+
+    def _reconstruct(self,
+                     B1, B2,
+                     y1, y2,
+                     phi, lam, eigvals,
+                     *,
+                     ext=(586, 1548.52, 1058, 691.32),
+                     w=(1., 1.), rho=-0.6, mu=0.1,
+                     bad_channels: list[int] = []
+                     ) -> np.ndarray:
+        """
+        Soft‐tied dual‐wavelength inversion, dropping bad_channels in both B and y.
+        Returns vertex‐wise HbO map.
+        """
+        εO1, εR1, εO2, εR2 = ext
+        # build dual forward model
+        M1 = np.hstack((εO1 * B1, εR1 * B1))
+        M2 = np.hstack((εO2 * B2, εR2 * B2))
+        B = np.vstack((w[0] * M1, w[1] * M2))
+        y = np.concatenate((w[0] * y1.flatten(order="F"),
+                            w[1] * y2.flatten(order="F")))
+
+        # drop bad rows
+        m = B1.shape[0]
+        if bad_channels:
+            mask = np.ones(B.shape[0], dtype=bool)
+            mask[bad_channels] = False
+            mask[m + np.array(bad_channels)] = False
+            B = B[mask, :]
+            y = y[mask]
+
+        # regularisation
+        Λ = np.diag(np.tile(eigvals, 2))
+        I = np.eye(eigvals.size)
+        C = mu * np.block([[I, -rho * I],
+                           [-rho * I, rho ** 2 * I]])
+        A = B.T @ B + lam * Λ + C
+
+        α = np.linalg.solve(A, B.T @ y)
+        return phi @ α[:eigvals.size]
 
 
 class ConvertToTStats(ProcessingStep):
@@ -352,7 +541,12 @@ class ConvertToTStats(ProcessingStep):
                 
                 if start_idx < end_idx:
                     X[start_idx:end_idx, i] = 1.0
-        
+        tr = 1.0 / fs
+        hrf = canonical_double_gamma_hrf(tr=tr, duration=30.0)  # or your choice
+        for col_idx in range(n_conditions):
+            # convolve
+            col_convolved = convolve(X[:, col_idx], hrf, mode='full')[:n_time_points]
+            X[:, col_idx] = col_convolved
         return X, conditions
 
     def _glm_single_channel_tstats(self, y: np.ndarray, X: np.ndarray, max_iter: int = 20, tol: float = 1e-2) -> tuple[np.ndarray, np.ndarray]:
@@ -693,8 +887,8 @@ class BandpassFilter(ProcessingStep):
         Args:
             session: The session to process (modified in-place)
         """
-        session.processed_data["wl1"] = self._apply_filter(session.processed_data["wl1"])
-        session.processed_data["wl2"] = self._apply_filter(session.processed_data["wl2"])
+        session.processed_data["HbO"] = self._apply_filter(session.processed_data["HbO"])
+        session.processed_data["HbR"] = self._apply_filter(session.processed_data["HbR"])
     
     def _apply_filter(self, data: np.ndarray) -> np.ndarray:
         """

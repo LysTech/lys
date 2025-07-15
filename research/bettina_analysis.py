@@ -8,7 +8,7 @@ from lys.processing.pipeline import ProcessingPipeline
 
 experiment_name = "8classes"
 experiment = create_experiment(experiment_name, "nirs")
-experiment.sessions = experiment.sessions[0:1]
+#experiment.sessions = experiment.sessions[0:1]
 
 ##
 #if False:
@@ -28,14 +28,13 @@ scene.add(sd_mesh).add(segmentation).format(segmentation, opacity=0.02).show()
 
 
 config = [
+    {"DetectBadChannels": {}},
     {"ConvertWavelengthsToOD": {}},
     {"ConvertODtoHbOandHbR": {}},
     {"RemoveScalpEffect": {}},
+    {"BandpassFilter": {"lower_bound": 0.01, "upper_bound": 0.1}},
     {"ConvertToTStats": {}},
-    {"HemoToOD":{}},
-#    {"Zscore":{}},
-#    {"ConvertToTStats": {}},
-    {"ReconstructDual": {"num_eigenmodes": 390}}
+    {"ReconstructDualWithoutBadChannels": {"num_eigenmodes": 390}}
 ]
 
 processing_pipeline = ProcessingPipeline(config)
@@ -49,6 +48,8 @@ for session in experiment.sessions:
     for task in session.protocol.tasks:
         print(f"Task: {task}")
         reconstructed_tstats = session.processed_data["t_HbO_reconstructed"][task]
+        print(f"Bad channels: {session.processed_data["bad_channels"]}")
+        print(f"Number of bad channels: {len(session.processed_data["bad_channels"])}")
         mri_tstats = get_mri_tstats(session.patient.name, task)
         corr = np.corrcoef(reconstructed_tstats, mri_tstats)[0, 1]
         tstat_firsts.append(corr)
