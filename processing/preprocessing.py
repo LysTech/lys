@@ -82,9 +82,12 @@ class BettinaSessionAdapter(ISessionAdapter):
 class Flow2MomentsSessionAdapter(ISessionAdapter):
     """
     Adapter for Kernel Flow2 .snirf files from the 'Moments' pipeline.
+
+    nb that idk if this works for the "Hb Moments" pipeline
+
+    This extracts a (num_timepoints, num_channels, num_wavelengths, num_moments) array.
+    where num_moments is 3, and the moments are amplitude, mean_time_of_flight, and variance.
     
-    This adapter extracts intensity, mean time of flight, and variance from the
-    SNIRF file.
     """
     def can_handle(self, session_path: Path) -> bool:
         """Check if this session contains a .snirf file."""
@@ -99,12 +102,21 @@ class Flow2MomentsSessionAdapter(ISessionAdapter):
         - 'wavelengths': list of wavelength indices
         - 'moment_names': ['amplitude', 'mean_time_of_flight', 'variance']
         - 'time': time vector (n_timepoints,)
+        - 'absolute_start_time': ISO8601 string (YYYY-MM-DDTHH:MM:SS) when dataset began recording
         """
         snirf_path = next(session_path.glob('*_MOMENTS.snirf'))
         snirf_data = snirf.Snirf(str(snirf_path), 'r')
         nirs_data_block = snirf_data.nirs[0].data[0]
         mlist = nirs_data_block.measurementList
         n_timepoints = nirs_data_block.dataTimeSeries.shape[0]
+
+        # Extract absolute start time from metaDataTags
+        meta = snirf_data.nirs[0].metaDataTags
+        assert hasattr(meta, 'MeasurementDate'), "metaDataTags must have 'MeasurementDate'"
+        assert hasattr(meta, 'MeasurementTime'), "metaDataTags must have 'MeasurementTime'"
+        date = getattr(meta, 'MeasurementDate')
+        time = getattr(meta, 'MeasurementTime')
+        absolute_start_time = f"{date}T{time}"
 
         # 1. Build unique channel and wavelength lists
         channel_tuples = sorted(set((m.sourceIndex, m.detectorIndex) for m in mlist))
@@ -145,5 +157,6 @@ class Flow2MomentsSessionAdapter(ISessionAdapter):
             'channels': channel_tuples,
             'wavelengths': wavelength_indices,
             'moment_names': moment_names,
-            'time': nirs_data_block.time
+            'time': nirs_data_block.time,
+            'absolute_start_time': absolute_start_time
         }
