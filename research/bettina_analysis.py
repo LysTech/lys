@@ -35,7 +35,7 @@ config = [
     {"BandpassFilter": {"lower_bound": 0.01, "upper_bound": 0.1}},
     {"ConvertToTStats": {}},
     {"ReconstructDualWithoutBadChannels":
-        {"num_eigenmodes": 390, "lambda_selection": "lcurve"}}  # ← or "corr"
+        {"num_eigenmodes": 390, "lambda_selection": "lcurve"}}  # ← or "corr" default is lcurve
 ]
 
 processing_pipeline = ProcessingPipeline(config)
