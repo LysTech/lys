@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 import numpy as np
 import snirf
+from datetime import datetime, timezone
 
 from lys.interfaces import ISessionAdapter
 
@@ -89,6 +90,7 @@ class Flow2MomentsSessionAdapter(ISessionAdapter):
     where num_moments is 3, and the moments are amplitude, mean_time_of_flight, and variance.
     
     """
+    #TODO: This doesn't get the EEG data out, but it should!
     def can_handle(self, session_path: Path) -> bool:
         """Check if this session contains a .snirf file."""
         assert session_path.is_dir()
@@ -101,8 +103,7 @@ class Flow2MomentsSessionAdapter(ISessionAdapter):
         - 'channels': list of (source, detector) tuples
         - 'wavelengths': list of wavelength indices
         - 'moment_names': ['amplitude', 'mean_time_of_flight', 'variance']
-        - 'time': time vector (n_timepoints,)
-        - 'absolute_start_time': ISO8601 string (YYYY-MM-DDTHH:MM:SS) when dataset began recording
+        - 'time': time vector (n_timepoints,) of absolute unix timestamps
         """
         snirf_path = next(session_path.glob('*_MOMENTS.snirf'))
         snirf_data = snirf.Snirf(str(snirf_path), 'r')
@@ -116,7 +117,20 @@ class Flow2MomentsSessionAdapter(ISessionAdapter):
         assert hasattr(meta, 'MeasurementTime'), "metaDataTags must have 'MeasurementTime'"
         date = getattr(meta, 'MeasurementDate')
         time = getattr(meta, 'MeasurementTime')
-        absolute_start_time = f"{date}T{time}"
+        absolute_start_time_str = f"{date}T{time}"
+
+        #TODO: double check this UTC stuff manually (its not mentioned in the docs)
+        # Convert start time to UTC timestamp
+        start_datetime = datetime.fromisoformat(absolute_start_time_str)
+        # check if timezone-aware, if not, assume UTC
+        if start_datetime.tzinfo is None:
+            start_datetime = start_datetime.replace(tzinfo=timezone.utc)
+        start_timestamp = start_datetime.timestamp()
+
+        # Create absolute time vector
+        relative_time_vector = nirs_data_block.time
+        absolute_time_vector = relative_time_vector + start_timestamp
+
 
         # 1. Build unique channel and wavelength lists
         channel_tuples = sorted(set((m.sourceIndex, m.detectorIndex) for m in mlist))
@@ -152,11 +166,85 @@ class Flow2MomentsSessionAdapter(ISessionAdapter):
                     widx = wavelength_index[w]
                     data[:, cidx, widx, moment_idx] = nirs_data_block.dataTimeSeries[:, col]
 
+        # Align data with the protocol start time
+        data, absolute_time_vector = self._align_with_protocol(
+            data, absolute_time_vector, session_path
+        )
+
         return {
             'data': data,
             'channels': channel_tuples,
             'wavelengths': wavelength_indices,
             'moment_names': moment_names,
-            'time': nirs_data_block.time,
-            'absolute_start_time': absolute_start_time
+            'time': absolute_time_vector,
         }
+
+    def _align_with_protocol(self, data: np.ndarray, time_vector: np.ndarray, session_path: Path) -> tuple[np.ndarray, np.ndarray]:
+        """Aligns NIRS data with the protocol start time by trimming the beginning."""
+        protocol_start_time = self._get_protocol_start_time(session_path)
+        
+        alignment_index = self._find_alignment_index(time_vector, protocol_start_time)
+        
+        trimmed_data = data[alignment_index:, ...]
+        trimmed_time_vector = time_vector[alignment_index:]
+        
+        # Assert that the alignment was successful and the new start time is correct.
+        if len(trimmed_time_vector) > 0 and len(time_vector) > 1:
+            # Calculate sampling frequency from original, untrimmed time vector
+            fs = 1 / np.mean(np.diff(time_vector))
+            
+            actual_start_time = trimmed_time_vector[0]
+            time_difference = abs(actual_start_time - protocol_start_time)
+            
+            # The difference should be less than half a sample period.
+            assert time_difference < (1 / fs) / 2, (
+                f"Time difference after alignment ({time_difference:.4f}s) is larger than "
+                f"half a sample period ({((1 / fs) / 2):.4f}s). Alignment failed."
+            )
+
+        return trimmed_data, trimmed_time_vector
+
+    def _get_protocol_start_time(self, session_path: Path) -> float:
+        """Finds and returns the protocol's start time from the .jsonl log file."""
+        import json
+        try:
+            protocol_log_path = next(session_path.glob('*.jsonl'))
+        except StopIteration:
+            raise FileNotFoundError(f"No .jsonl protocol log file found in {session_path}")
+            
+        with open(protocol_log_path, 'r') as f:
+            first_line = f.readline()
+        
+        try:
+            first_event = json.loads(first_line)
+            # Assuming the timestamp is a unix timestamp in a 'timestamp' field.
+            return float(first_event['timestamp'])
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            raise ValueError(
+                f"Could not extract timestamp from the first line of {protocol_log_path}. "
+                f"Ensure it's a valid JSON object with a 'timestamp' key. Error: {e}"
+            )
+
+    def _find_alignment_index(self, nirs_time_vector: np.ndarray, protocol_start_time: float) -> int:
+        """Finds the index in the NIRS time vector corresponding to the protocol start."""
+        nirs_start_time = nirs_time_vector[0]
+        
+        if nirs_start_time > protocol_start_time:
+            raise ValueError(
+                f"NIRS data recording started at {nirs_start_time} "
+                f"which is AFTER the protocol started at {protocol_start_time}. "
+                "Cannot align data."
+            )
+            
+        # Find the index of the NIRS time point closest to the protocol start time
+        alignment_index = np.argmin(np.abs(nirs_time_vector - protocol_start_time))
+        
+        return int(alignment_index)
+
+
+if __name__=="__main__":
+    import os
+    from lys.utils import lys_data_dir
+    session_path = Path(os.path.join(lys_data_dir(), "thomas/flow2/perceived_speech/session-01"))
+    processor = Flow2MomentsSessionAdapter()
+    data = processor.extract_data(session_path)

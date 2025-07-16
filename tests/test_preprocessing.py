@@ -109,6 +109,18 @@ def test_flow2_can_handle_false(tmp_path):
 
 def test_flow2_extract_data_shape_and_metadata(monkeypatch, tmp_path):
     """extract_data returns correct shape and metadata for a mocked SNIRF file."""
+    import json
+    from datetime import datetime, timezone
+
+    # --- Setup for alignment logic ---
+    # Create a dummy .jsonl file. We'll set the NIRS start time to match this
+    # exactly, so no trimming should occur, keeping the test focused on reshaping.
+    start_time = datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    protocol_start_timestamp = start_time.timestamp()
+    log_file = tmp_path / "protocol.jsonl"
+    with open(log_file, 'w') as f:
+        json.dump({'timestamp': protocol_start_timestamp, 'event': 'start'}, f)
+
     # Create a fake snirf file
     fake_file = tmp_path / 'bar_MOMENTS.snirf'
     fake_file.touch()
@@ -142,22 +154,110 @@ def test_flow2_extract_data_shape_and_metadata(monkeypatch, tmp_path):
     ]
     # Fake data: (n_timepoints, n_measurements)
     fake_data = np.arange(n_timepoints * len(mlist)).reshape(n_timepoints, len(mlist))
-    fake_time = np.linspace(0, 1, n_timepoints)
+    # The time vector in SNIRF is relative to the start time
+    relative_time = np.linspace(0, (n_timepoints - 1) / 10.0, n_timepoints) # assume 10Hz
+    
     fake_data_block = MagicMock()
     fake_data_block.measurementList = mlist
     fake_data_block.dataTimeSeries = fake_data
-    fake_data_block.time = fake_time
+    fake_data_block.time = relative_time
+    
+    # --- Mock metadata for start time calculation (this was the missing part) ---
+    fake_meta = MagicMock()
+    fake_meta.MeasurementDate = start_time.strftime('%Y-%m-%d')
+    fake_meta.MeasurementTime = start_time.strftime('%H:%M:%S')
+
     fake_nirs = MagicMock()
     fake_nirs.data = [fake_data_block]
+    fake_nirs.metaDataTags = fake_meta
+
     fake_snirf = MagicMock()
     fake_snirf.nirs = [fake_nirs]
+    
     # Patch snirf.Snirf to return our fake object
     with patch('snirf.Snirf', return_value=fake_snirf):
         adapter = Flow2MomentsSessionAdapter()
         result = adapter.extract_data(tmp_path)
+        
+    # --- Assertions ---
+    # The main purpose of this test: check the reshaping and metadata extraction
     arr = result['data']
     assert arr.shape == (n_timepoints, n_channels, n_wavelengths, n_moments)
     assert set(result['moment_names']) == {'amplitude', 'mean_time_of_flight', 'variance'}
     assert len(result['channels']) == n_channels
     assert len(result['wavelengths']) == n_wavelengths
-    np.testing.assert_array_equal(result['time'], fake_time) 
+    
+    # The time vector should now be absolute, and since we aligned it perfectly,
+    # it should be untrimmed and match the expected absolute timestamps.
+    expected_absolute_time = relative_time + protocol_start_timestamp
+    assert result['time'].shape[0] == n_timepoints
+    np.testing.assert_allclose(result['time'], expected_absolute_time)
+
+
+def test_flow2_adapter_aligns_with_protocol(monkeypatch, tmp_path):
+    """
+    Test that Flow2MomentsSessionAdapter correctly trims NIRS data to align
+    with the protocol's start time.
+    """
+    import json
+    from datetime import datetime, timezone
+
+    # 1. Define timing parameters for the test
+    nirs_start_time = datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    protocol_start_offset_s = 5
+    protocol_start_time = nirs_start_time.timestamp() + protocol_start_offset_s
+    fs = 10  # Hz
+    n_timepoints = 100  # 10 seconds of data
+
+    # 2. Create a fake .jsonl protocol file
+    log_file = tmp_path / "protocol.jsonl"
+    with open(log_file, 'w') as f:
+        json.dump({'timestamp': protocol_start_time, 'event': 'start'}, f)
+
+    # 3. Create a fake SNIRF file on disk (needed for the adapter to find it)
+    fake_snirf_file = tmp_path / 'test_MOMENTS.snirf'
+    fake_snirf_file.touch()
+
+    # 4. Mock the snirf.Snirf object and its data
+    # Create a time vector for the NIRS data
+    nirs_time_vector = np.linspace(
+        nirs_start_time.timestamp(),
+        nirs_start_time.timestamp() + (n_timepoints - 1) / fs,
+        n_timepoints
+    )
+
+    fake_data_block = MagicMock()
+    fake_data_block.dataTimeSeries = np.random.rand(n_timepoints, 1) # Shape doesn't matter here
+    fake_data_block.time = nirs_time_vector - nirs_time_vector[0] # snirf time is relative
+    fake_data_block.measurementList = [MagicMock()] # Minimal mock
+
+    fake_meta = MagicMock()
+    fake_meta.MeasurementDate = nirs_start_time.strftime('%Y-%m-%d')
+    fake_meta.MeasurementTime = nirs_start_time.strftime('%H:%M:%S')
+
+    fake_nirs = MagicMock()
+    fake_nirs.data = [fake_data_block]
+    fake_nirs.metaDataTags = fake_meta
+
+    fake_snirf_obj = MagicMock()
+    fake_snirf_obj.nirs = [fake_nirs]
+    
+    # 5. Run the adapter with the mocked snirf object
+    adapter = Flow2MomentsSessionAdapter()
+    with patch('snirf.Snirf', return_value=fake_snirf_obj):
+        result = adapter.extract_data(tmp_path)
+
+    # 6. Assert the results
+    # The data should be trimmed by `protocol_start_offset_s * fs` samples
+    expected_trimmed_samples = protocol_start_offset_s * fs
+    expected_remaining_samples = n_timepoints - expected_trimmed_samples
+    
+    assert result['data'].shape[0] == expected_remaining_samples
+    assert result['time'].shape[0] == expected_remaining_samples
+
+    # The new start time should be very close to the protocol start time
+    actual_start_time = result['time'][0]
+    time_difference = abs(actual_start_time - protocol_start_time)
+    
+    # Assert that the difference is less than half a sample period
+    assert time_difference < (1 / fs) / 2 
