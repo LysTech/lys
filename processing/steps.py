@@ -294,35 +294,266 @@ class ReconstructDual(ProcessingStep):
         return Bmn
 
 
+#OLD
+# class ReconstructDualWithoutBadChannels(ProcessingStep):
+#     """
+#     Dual‐wavelength eigenmode reconstruction that first drops any flat/noisy
+#     channels flagged in session.processed_data["bad_channels"].
+#     """
+#     def __init__(self, num_eigenmodes: int,
+#                  lambda_selection: str = "lcurve"):   # "lcurve"  or  "corr"
+#         self.num_eigenmodes   = num_eigenmodes
+#         self.lambda_selection = lambda_selection      # ← new
+#
+#     # ------------------------------------------------------------------
+#     # Pick parameter that maximizes correlation with fMRI
+#     # ------------------------------------------------------------------
+#     def _find_best_lambda_corr(self, B1, B2, y1, y2,
+#                                phi, eigvals, verts, fmri, bad):
+#         params  = np.logspace(-5, 5, 65)
+#         best_r, best_lam = -np.inf, params[0]
+#         for lam in params:
+#             X = self._reconstruct(B1, B2, y1, y2, phi, lam, eigvals,
+#                                   bad_channels=bad)
+#             r = np.corrcoef(X, fmri)[0, 1]
+#             if r > best_r:
+#                 best_r, best_lam = r, lam
+#         return best_lam
+#
+#     # ------------------------------------------------------------------
+#     # NEW L‑curve picker (helpers embedded for brevity)
+#     # ------------------------------------------------------------------
+#     @staticmethod
+#     def _curv(xm, x, xp, ym, y, yp):
+#         dx1, dx2 = x - xm, xp - x;  dy1, dy2 = y - ym, yp - y
+#         dx = .5*(dx1+dx2);  dy = .5*(dy1+dy2)
+#         ddx = dx2 - dx1;    ddy = dy2 - dy1
+#         return abs(ddx*dy - ddy*dx) / ((dx*dx+dy*dy)**1.5 + 1e-12)
+#
+#     def _find_best_lambda_lcurve(self, B1, B2, y1, y2,
+#                                  phi, eigvals, verts, fmri, bad):
+#         # build dual system once (same as in _reconstruct)
+#         εO1, εR1, εO2, εR2 = 586, 1548.52, 1058, 691.32
+#         M1 = np.hstack((εO1*B1, εR1*B1));  M2 = np.hstack((εO2*B2, εR2*B2))
+#         B  = np.vstack((M1, M2))
+#         y  = np.concatenate((y1.flatten(order='F'), y2.flatten(order='F')))
+#         if bad:                              # drop rows for bad channels twice
+#             m      = B1.shape[0]
+#             mask   = np.ones(B.shape[0], bool)
+#             mask[bad] = False;  mask[m+np.array(bad)] = False
+#             B, y  = B[mask], y[mask]
+#
+#         Λ = np.diag(np.tile(eigvals, 2))
+#         n = eigvals.size; I = np.eye(n); rho, mu = -0.6, 0.1
+#         C = mu*np.block([[I, -rho*I], [-rho*I, rho**2*I]])
+#
+#         lam_grid = np.logspace(-5, 5, 65)
+#         res, sol = [], []
+#         for lam in lam_grid:
+#             A   = B.T@B + lam*Λ + C
+#             α   = np.linalg.solve(A, B.T@y)
+#             res.append(np.linalg.norm(B@α - y))
+#             sol.append(np.linalg.norm(np.sqrt(Λ)@α))
+#
+#         log_r, log_s = np.log10(res), np.log10(sol)
+#         curv = [0]+[self._curv(log_r[i-1],log_r[i],log_r[i+1],
+#                                log_s[i-1],log_s[i],log_s[i+1])
+#                     for i in range(1,len(lam_grid)-1)]+[0]
+#         return float(lam_grid[int(np.argmax(curv))])
+#
+#     # ------------------------------------------------------------------
+#     # choose picker based on user flag
+#     # ------------------------------------------------------------------
+#     def _find_best_lambda(self, *args, **kw):
+#         pick = self._find_best_lambda_lcurve if self.lambda_selection=="lcurve" \
+#                else self._find_best_lambda_corr
+#         return pick(*args, **kw)
+#
+#
+#     def _do_process(self, session: "Session") -> None:
+#         # --- 1) load mesh + eigenmodes ---
+#         verts = session.patient.mesh.vertices
+#         if session.patient.mesh.eigenmodes is None:
+#             raise ValueError("Mesh has no eigenmodes.")
+#         start, end = 2, 2 + self.num_eigenmodes
+#         # stack then transpose → (n_vertices, M)
+#         phi = np.vstack(session.patient.mesh.eigenmodes[start:end]).T
+#         eigvals = np.array([e.eigenvalue for e in session.patient.mesh.eigenmodes[start:end]])
+#         eigvals[0] = 0.0
+#
+#         # --- 2) sample Jacobians + build Bmn blocks ---
+#         vj1 = session.jacobians[0].sample_at_vertices(verts)
+#         vj2 = session.jacobians[1].sample_at_vertices(verts)
+#         B1 = self._compute_Bmn(vj1, phi)
+#         B2 = self._compute_Bmn(vj2, phi)
+#
+#         # --- 3) grab bad_channels (must have run DetectBadChannels first) ---
+#         bad = session.processed_data.get("bad_channels", [])
+#
+#         # --- 4) iterate tasks ---
+#         tO = session.processed_data["t_HbO"]
+#         tR = session.processed_data["t_HbR"]
+#         session.processed_data["t_HbO_reconstructed"] = {}
+#         session.processed_data["t_HbR_reconstructed"] = {}
+#
+#         from lys.utils.mri_tstat import get_mri_tstats
+#         for task in session.protocol.tasks:
+#             y1 = tO[task]
+#             y2 = tR[task]
+#             fmri = get_mri_tstats(session.patient.name, task)
+#
+#             lam = self._find_best_lambda(B1, B2, y1, y2, phi, eigvals, verts, fmri, bad)
+#             print(f"  Optimal regularization parameter: {lam:.6f}\n")
+#             rec = self._reconstruct(
+#                 B1, B2, y1, y2, phi, lam, eigvals,
+#                 bad_channels=bad
+#             )
+#
+#             session.processed_data["t_HbO_reconstructed"][task] = rec[0]
+#             session.processed_data["t_HbR_reconstructed"][task] = rec[1]
+#
+#         # cleanup
+#         del session.processed_data["t_HbO"]
+#         del session.processed_data["t_HbR"]
+#
+#     def _compute_Bmn(self, vj: np.ndarray, phi: np.ndarray) -> np.ndarray:
+#         """
+#         Contract Jacobian (N_vertices, S, D) with phi (N_vertices, M)
+#         → Bmn (S*D, M) in Fortran order.
+#         """
+#         B = np.einsum("nsd,nm->sdm", vj, phi)
+#         S, D, M = B.shape
+#         return B.reshape(S * D, M, order="F")
+#
+#     def _reconstruct(self,
+#                      B1, B2,
+#                      y1, y2,
+#                      phi, lam, eigvals,
+#                      *,
+#                      ext=(586, 1548.52, 1058, 691.32),
+#                      w=(1., 1.), rho=-0.6, mu=0.1,
+#                      eps=0.5,  # ← tolerance for eigen‑mode filter
+#                      bad_channels: list[int] = []):
+#         """
+#         Dual‑wavelength inversion with optional *eigen‑mode* anti‑correlation filter.
+#
+#         eps : float or None
+#             If a float (0‥1), zero‑out any eigen‑mode i whose mismatch
+#             |α_R[i] – ρ α_O[i]| / √(α_O²+α_R²)  >  eps.
+#             Set to None to disable the filter.
+#         """
+#         εO1, εR1, εO2, εR2 = ext
+#         # ------------ forward model blocks ------------
+#         M1 = np.hstack((εO1 * B1, εR1 * B1))
+#         M2 = np.hstack((εO2 * B2, εR2 * B2))
+#         B = np.vstack((w[0] * M1, w[1] * M2))
+#         y = np.concatenate((w[0] * y1.flatten(order="F"),
+#                             w[1] * y2.flatten(order="F")))
+#
+#         # ------------ drop bad channels ------------
+#         m = B1.shape[0]
+#         if bad_channels:
+#             mask = np.ones(B.shape[0], bool)
+#             mask[bad_channels] = False
+#             mask[m + np.array(bad_channels)] = False
+#             B, y = B[mask], y[mask]
+#
+#         # ------------ regularised solve ------------
+#         Λ = np.diag(np.tile(eigvals, 2))
+#         n = eigvals.size
+#         I = np.eye(n)
+#         C = mu * np.block([[rho**2 * I, -rho * I],
+#                            [-rho * I, I]])
+#
+#         α = np.linalg.solve(B.T @ B + lam * Λ + C, B.T @ y)
+#         α_O, α_R = α[:n], α[n:]
+#
+#         # ------------ eigen‑mode filter ------------
+#         if eps is not None:
+#             mismatch = np.abs(α_R - rho * α_O) / (np.sqrt(α_O ** 2 + α_R ** 2) + 1e-12)
+#             keep = mismatch <= eps
+#             α_O = α_O * keep  # zero out un‑matched modes
+#             α_R = α_R * keep
+#
+#         # ------------ back‑projection ------------
+#         return phi @ α_O, phi @ α_R
+#
+#     def _reconstruct_withoutanticorrelationcheck(self,
+#                      B1, B2,
+#                      y1, y2,
+#                      phi, lam, eigvals,
+#                      *,
+#                      ext=(586, 1548.52, 1058, 691.32),
+#                      w=(1., 1.), rho=-0.6, mu=0,
+#                      bad_channels: list[int] = []
+#                      ) -> np.ndarray:
+#         """
+#         Soft‐tied dual‐wavelength inversion, dropping bad_channels in both B and y.
+#         Returns vertex‐wise HbO map.
+#         """
+#         εO1, εR1, εO2, εR2 = ext
+#         # build dual forward model
+#         M1 = np.hstack((εO1 * B1, εR1 * B1))
+#         M2 = np.hstack((εO2 * B2, εR2 * B2))
+#         B = np.vstack((w[0] * M1, w[1] * M2))
+#         y = np.concatenate((w[0] * y1.flatten(order="F"),
+#                             w[1] * y2.flatten(order="F")))
+#
+#         # drop bad rows
+#         m = B1.shape[0]
+#         if bad_channels:
+#             mask = np.ones(B.shape[0], dtype=bool)
+#             mask[bad_channels] = False
+#             mask[m + np.array(bad_channels)] = False
+#             B = B[mask, :]
+#             y = y[mask]
+#
+#         # regularisation
+#         Λ = np.diag(np.tile(eigvals, 2))
+#         I = np.eye(eigvals.size)
+#         C = mu * np.block([[I, -rho * I],
+#                            [-rho * I, rho ** 2 * I]])
+#         A = B.T @ B + lam * Λ + C
+#
+#         α = np.linalg.solve(A, B.T @ y)
+#         return phi @ α[:eigvals.size], phi @ α[eigvals.size:]
+
 
 class ReconstructDualWithoutBadChannels(ProcessingStep):
     """
-    Dual‐wavelength eigenmode reconstruction that first drops any flat/noisy
-    channels flagged in session.processed_data["bad_channels"].
+    Dual-wavelength eigen-mode reconstruction with bad-channel pruning.
+    Supported hyper-parameter pickers (keyword *lambda_selection*):
+        "corr"   – maximise fNIRS–fMRI correlation            (1-D)
+        "lcurve" – classic 2-term L-curve corner              (1-D)
+        "pareto" – 3-term Pareto-surface corner               (2-D)
+        "gcv"    – two-parameter Generalised Cross-Validation (2-D)
+    All pickers now return a pair (λ*, μ*).  If μ* is None the
+    solver falls back to the default coupling μ=0.1.
     """
-    def __init__(self, num_eigenmodes: int,
-                 lambda_selection: str = "lcurve"):   # "lcurve"  or  "corr"
-        self.num_eigenmodes   = num_eigenmodes
-        self.lambda_selection = lambda_selection      # ← new
 
-    # ------------------------------------------------------------------
-    # Pick parameter that maximizes correlation with fMRI
-    # ------------------------------------------------------------------
+    # ---------- constructor -------------------------------------------------
+    def __init__(self, num_eigenmodes: int, lambda_selection: str = "lcurve"):
+        if lambda_selection not in ("corr", "lcurve", "pareto", "gcv"):
+            raise ValueError("lambda_selection must be "
+                             "'corr', 'lcurve', 'pareto' or 'gcv'")
+        self.num_eigenmodes   = num_eigenmodes
+        self.lambda_selection = lambda_selection
+
+    # =======================================================================
+    # 1-D pickers kept from the original code
+    # =======================================================================
     def _find_best_lambda_corr(self, B1, B2, y1, y2,
                                phi, eigvals, verts, fmri, bad):
         params  = np.logspace(-5, 5, 65)
-        best_r, best_lam = -np.inf, params[0]
+        best_r, best = -np.inf, params[0]
         for lam in params:
-            X = self._reconstruct(B1, B2, y1, y2, phi, lam, eigvals,
-                                  bad_channels=bad)
+            X, _ = self._reconstruct(B1, B2, y1, y2, phi, lam, eigvals,
+                                     bad_channels=bad)
             r = np.corrcoef(X, fmri)[0, 1]
             if r > best_r:
-                best_r, best_lam = r, lam
-        return best_lam
+                best_r, best = r, lam
+        return best, None          # (λ*, μ*)
 
-    # ------------------------------------------------------------------
-    # NEW L‑curve picker (helpers embedded for brevity)
-    # ------------------------------------------------------------------
     @staticmethod
     def _curv(xm, x, xp, ym, y, yp):
         dx1, dx2 = x - xm, xp - x;  dy1, dy2 = y - ym, yp - y
@@ -332,16 +563,15 @@ class ReconstructDualWithoutBadChannels(ProcessingStep):
 
     def _find_best_lambda_lcurve(self, B1, B2, y1, y2,
                                  phi, eigvals, verts, fmri, bad):
-        # build dual system once (same as in _reconstruct)
         εO1, εR1, εO2, εR2 = 586, 1548.52, 1058, 691.32
         M1 = np.hstack((εO1*B1, εR1*B1));  M2 = np.hstack((εO2*B2, εR2*B2))
         B  = np.vstack((M1, M2))
         y  = np.concatenate((y1.flatten(order='F'), y2.flatten(order='F')))
-        if bad:                              # drop rows for bad channels twice
-            m      = B1.shape[0]
-            mask   = np.ones(B.shape[0], bool)
-            mask[bad] = False;  mask[m+np.array(bad)] = False
-            B, y  = B[mask], y[mask]
+        if bad:
+            m = B1.shape[0]
+            mask = np.ones(B.shape[0], bool)
+            mask[bad] = False; mask[m+np.array(bad)] = False
+            B, y = B[mask], y[mask]
 
         Λ = np.diag(np.tile(eigvals, 2))
         n = eigvals.size; I = np.eye(n); rho, mu = -0.6, 0.1
@@ -350,8 +580,7 @@ class ReconstructDualWithoutBadChannels(ProcessingStep):
         lam_grid = np.logspace(-5, 5, 65)
         res, sol = [], []
         for lam in lam_grid:
-            A   = B.T@B + lam*Λ + C
-            α   = np.linalg.solve(A, B.T@y)
+            α = np.linalg.solve(B.T@B + lam*Λ + C, B.T@y)
             res.append(np.linalg.norm(B@α - y))
             sol.append(np.linalg.norm(np.sqrt(Λ)@α))
 
@@ -359,38 +588,167 @@ class ReconstructDualWithoutBadChannels(ProcessingStep):
         curv = [0]+[self._curv(log_r[i-1],log_r[i],log_r[i+1],
                                log_s[i-1],log_s[i],log_s[i+1])
                     for i in range(1,len(lam_grid)-1)]+[0]
-        return float(lam_grid[int(np.argmax(curv))])
+        return float(lam_grid[int(np.argmax(curv))]), None
 
-    # ------------------------------------------------------------------
-    # choose picker based on user flag
-    # ------------------------------------------------------------------
-    def _find_best_lambda(self, *args, **kw):
-        pick = self._find_best_lambda_lcurve if self.lambda_selection=="lcurve" \
-               else self._find_best_lambda_corr
-        return pick(*args, **kw)
+    # =======================================================================
+    # 2-D pickers – NEW
+    # =======================================================================
+    def _find_best_param_pareto(self, B1, B2, y1, y2,
+                                phi, eigvals, verts, fmri, bad,
+                                lam_grid=np.logspace(-5,5,31),
+                                mu_grid =np.logspace(-5,5,31),
+                                ext=(586,1548.52,1058,691.32),
+                                w=(1.,1.), rho=-.6):
+        εO1, εR1, εO2, εR2 = ext
+        M1 = np.hstack((εO1*B1, εR1*B1));  M2 = np.hstack((εO2*B2, εR2*B2))
+        B  = np.vstack((w[0]*M1, w[1]*M2))
+        y  = np.concatenate((w[0]*y1.flatten(order='F'),
+                             w[1]*y2.flatten(order='F')))
+        if bad:
+            m = B1.shape[0]
+            mask = np.ones(B.shape[0], bool)
+            mask[bad] = False; mask[m+np.array(bad)] = False
+            B, y = B[mask], y[mask]
 
+        n = eigvals.size
+        Λ = np.diag(np.tile(eigvals, 2))
+        I = np.eye(n)
+        P = np.block([[ I, -rho*I], [-rho*I, rho**2*I]])
 
-    def _do_process(self, session: "Session") -> None:
-        # --- 1) load mesh + eigenmodes ---
+        R = np.empty((len(lam_grid), len(mu_grid)))
+        S = np.empty_like(R)
+        C = np.empty_like(R)
+        for i, lam in enumerate(lam_grid):
+            for j, mu in enumerate(mu_grid):
+                A  = B.T @ B + lam*Λ + mu*P
+                α  = np.linalg.solve(A, B.T@y)
+                R[i,j] = np.linalg.norm(B@α - y)
+                S[i,j] = np.linalg.norm(np.sqrt(Λ)@α)
+                C[i,j] = np.linalg.norm(P@α)
+
+        r, s, c = np.log10(R), np.log10(S), np.log10(C)
+        dr_dλ = np.gradient(r, np.log10(lam_grid), axis=0)
+        dr_dμ = np.gradient(r, np.log10(mu_grid),  axis=1)
+        ds_dλ = np.gradient(s, np.log10(lam_grid), axis=0)
+        ds_dμ = np.gradient(s, np.log10(mu_grid),  axis=1)
+        dc_dλ = np.gradient(c, np.log10(lam_grid), axis=0)
+        dc_dμ = np.gradient(c, np.log10(mu_grid),  axis=1)
+
+        tx = np.stack([dr_dλ, ds_dλ, dc_dλ], axis=-1)
+        ty = np.stack([dr_dμ, ds_dμ, dc_dμ], axis=-1)
+        κ  = np.linalg.norm(np.cross(tx, ty), axis=-1) \
+             / (np.linalg.norm(tx, axis=-1)**2 *
+                np.linalg.norm(ty, axis=-1)**2)**0.5
+        i, j = np.unravel_index(np.argmax(κ), κ.shape)
+        return float(lam_grid[i]), float(mu_grid[j])
+
+    def _find_best_param_gcv(self, B1, B2, y1, y2,
+                             phi, eigvals, verts, fmri, bad,
+                             lam_grid=np.logspace(-5,5,31),
+                             mu_grid =np.logspace(-5,5,31),
+                             ext=(586,1548.52,1058,691.32),
+                             w=(1.,1.), rho=-.6):
+        εO1, εR1, εO2, εR2 = ext
+        M1 = np.hstack((εO1*B1, εR1*B1));  M2 = np.hstack((εO2*B2, εR2*B2))
+        B  = np.vstack((w[0]*M1, w[1]*M2))
+        y  = np.concatenate((w[0]*y1.flatten(order='F'),
+                             w[1]*y2.flatten(order='F')))
+        if bad:
+            m = B1.shape[0]
+            mask = np.ones(B.shape[0], bool)
+            mask[bad] = False; mask[m+np.array(bad)] = False
+            B, y = B[mask], y[mask]
+
+        m  = B.shape[0]
+        Λ  = np.diag(np.tile(eigvals, 2))
+        n  = eigvals.size
+        I  = np.eye(n)
+        P  = np.block([[ I, -rho*I], [-rho*I, rho**2*I]])
+
+        best, best_gcv = (lam_grid[0], mu_grid[0]), np.inf
+        for lam in lam_grid:
+            for mu in mu_grid:
+                A       = B.T@B + lam*Λ + mu*P
+                A_invBT = np.linalg.solve(A, B.T)
+                α       = A_invBT @ y
+                res     = y - B @ α
+                rss     = res @ res
+                trH     = np.trace(B @ A_invBT)
+                gcv     = rss / (m - trH)**2 if m > trH else np.inf
+                if gcv < best_gcv:
+                    best_gcv, best = gcv, (lam, mu)
+        return float(best[0]), float(best[1])
+
+    # =======================================================================
+    # selector returning the chosen pair
+    # =======================================================================
+    def _pick_params(self, *args, **kw):
+        sel = self.lambda_selection
+        if   sel == "corr":   f = self._find_best_lambda_corr
+        elif sel == "lcurve": f = self._find_best_lambda_lcurve
+        elif sel == "pareto": f = self._find_best_param_pareto
+        elif sel == "gcv":    f = self._find_best_param_gcv
+        else: raise RuntimeError
+        return f(*args, **kw)
+
+    # =======================================================================
+    # remaining helpers (unchanged) – _compute_Bmn and _reconstruct
+    # =======================================================================
+    def _compute_Bmn(self, vj: np.ndarray, phi: np.ndarray) -> np.ndarray:
+        B = np.einsum("nsd,nm->sdm", vj, phi)
+        S, D, M = B.shape
+        return B.reshape(S * D, M, order="F")
+
+    def _reconstruct(self, B1, B2, y1, y2, phi, lam, eigvals,
+                     *, ext=(586,1548.52,1058,691.32),
+                     w=(1.,1.), rho=-0.6, mu=0.1,
+                     eps=0.5, bad_channels:list[int] = []):
+        εO1, εR1, εO2, εR2 = ext
+        M1 = np.hstack((εO1*B1, εR1*B1))
+        M2 = np.hstack((εO2*B2, εR2*B2))
+        B  = np.vstack((w[0]*M1, w[1]*M2))
+        y  = np.concatenate((w[0]*y1.flatten(order="F"),
+                             w[1]*y2.flatten(order="F")))
+        if bad_channels:
+            m = B1.shape[0]
+            mask = np.ones(B.shape[0], bool)
+            mask[bad_channels] = False
+            mask[m+np.array(bad_channels)] = False
+            B, y = B[mask], y[mask]
+
+        Λ = np.diag(np.tile(eigvals, 2))
+        n = eigvals.size
+        I = np.eye(n)
+        C = mu * np.block([[rho**2*I, -rho*I],
+                           [-rho*I,    I   ]])
+
+        α = np.linalg.solve(B.T@B + lam*Λ + C, B.T@y)
+        α_O, α_R = α[:n], α[n:]
+        # if eps is not None:
+        #     mismatch = np.abs(α_R - rho*α_O)/(np.sqrt(α_O**2+α_R**2)+1e-12)
+        #     keep = mismatch <= eps
+        #     α_O, α_R = α_O*keep, α_R*keep
+        return phi @ α_O, phi @ α_R
+
+    # =======================================================================
+    # main entry point (same logic, now two parameters)
+    # =======================================================================
+    def _do_process(self, session:"Session") -> None:
         verts = session.patient.mesh.vertices
         if session.patient.mesh.eigenmodes is None:
             raise ValueError("Mesh has no eigenmodes.")
-        start, end = 2, 2 + self.num_eigenmodes
-        # stack then transpose → (n_vertices, M)
-        phi = np.vstack(session.patient.mesh.eigenmodes[start:end]).T
-        eigvals = np.array([e.eigenvalue for e in session.patient.mesh.eigenmodes[start:end]])
+        s, e = 2, 2+self.num_eigenmodes
+        phi   = np.vstack(session.patient.mesh.eigenmodes[s:e]).T
+        eigvals = np.array([em.eigenvalue for em in
+                            session.patient.mesh.eigenmodes[s:e]])
         eigvals[0] = 0.0
 
-        # --- 2) sample Jacobians + build Bmn blocks ---
         vj1 = session.jacobians[0].sample_at_vertices(verts)
         vj2 = session.jacobians[1].sample_at_vertices(verts)
-        B1 = self._compute_Bmn(vj1, phi)
-        B2 = self._compute_Bmn(vj2, phi)
-
-        # --- 3) grab bad_channels (must have run DetectBadChannels first) ---
+        B1  = self._compute_Bmn(vj1, phi)
+        B2  = self._compute_Bmn(vj2, phi)
         bad = session.processed_data.get("bad_channels", [])
 
-        # --- 4) iterate tasks ---
         tO = session.processed_data["t_HbO"]
         tR = session.processed_data["t_HbR"]
         session.processed_data["t_HbO_reconstructed"] = {}
@@ -398,73 +756,23 @@ class ReconstructDualWithoutBadChannels(ProcessingStep):
 
         from lys.utils.mri_tstat import get_mri_tstats
         for task in session.protocol.tasks:
-            y1 = tO[task]
-            y2 = tR[task]
-            fmri = get_mri_tstats(session.patient.name, task)
+            y1, y2 = tO[task], tR[task]
+            fmri   = get_mri_tstats(session.patient.name, task)
 
-            lam = self._find_best_lambda(B1, B2, y1, y2, phi, eigvals, verts, fmri, bad)
-            print(f"  Optimal regularization parameter: {lam:.6f}\n")
-            rec = self._reconstruct(
-                B1, B2, y1, y2, phi, lam, eigvals,
-                bad_channels=bad
-            )
+            lam, mu = self._pick_params(B1, B2, y1, y2,
+                                        phi, eigvals, verts, fmri, bad)
+            if mu is None:   # 1-D pickers
+                mu = 0.1
+            print(f"Task {task:<15}  λ*={lam:.3g}  μ*={mu:.3g}")
 
-            session.processed_data["t_HbO_reconstructed"][task] = rec
-            session.processed_data["t_HbR_reconstructed"][task] = rec
+            HbO, HbR = self._reconstruct(B1, B2, y1, y2, phi,
+                                         lam, eigvals, mu=mu,
+                                         bad_channels=bad)
+            session.processed_data["t_HbO_reconstructed"][task] = HbO
+            session.processed_data["t_HbR_reconstructed"][task] = HbR
 
-        # cleanup
         del session.processed_data["t_HbO"]
         del session.processed_data["t_HbR"]
-
-    def _compute_Bmn(self, vj: np.ndarray, phi: np.ndarray) -> np.ndarray:
-        """
-        Contract Jacobian (N_vertices, S, D) with phi (N_vertices, M)
-        → Bmn (S*D, M) in Fortran order.
-        """
-        B = np.einsum("nsd,nm->sdm", vj, phi)
-        S, D, M = B.shape
-        return B.reshape(S * D, M, order="F")
-
-
-    def _reconstruct(self,
-                     B1, B2,
-                     y1, y2,
-                     phi, lam, eigvals,
-                     *,
-                     ext=(586, 1548.52, 1058, 691.32),
-                     w=(1., 1.), rho=-0.6, mu=0.1,
-                     bad_channels: list[int] = []
-                     ) -> np.ndarray:
-        """
-        Soft‐tied dual‐wavelength inversion, dropping bad_channels in both B and y.
-        Returns vertex‐wise HbO map.
-        """
-        εO1, εR1, εO2, εR2 = ext
-        # build dual forward model
-        M1 = np.hstack((εO1 * B1, εR1 * B1))
-        M2 = np.hstack((εO2 * B2, εR2 * B2))
-        B = np.vstack((w[0] * M1, w[1] * M2))
-        y = np.concatenate((w[0] * y1.flatten(order="F"),
-                            w[1] * y2.flatten(order="F")))
-
-        # drop bad rows
-        m = B1.shape[0]
-        if bad_channels:
-            mask = np.ones(B.shape[0], dtype=bool)
-            mask[bad_channels] = False
-            mask[m + np.array(bad_channels)] = False
-            B = B[mask, :]
-            y = y[mask]
-
-        # regularisation
-        Λ = np.diag(np.tile(eigvals, 2))
-        I = np.eye(eigvals.size)
-        C = mu * np.block([[I, -rho * I],
-                           [-rho * I, rho ** 2 * I]])
-        A = B.T @ B + lam * Λ + C
-
-        α = np.linalg.solve(A, B.T @ y)
-        return phi @ α[:eigvals.size]
 
 
 class ConvertToTStats(ProcessingStep):

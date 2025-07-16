@@ -35,11 +35,12 @@ config = [
     {"BandpassFilter": {"lower_bound": 0.01, "upper_bound": 0.1}},
     {"ConvertToTStats": {}},
     {"ReconstructDualWithoutBadChannels":
-        {"num_eigenmodes": 390, "lambda_selection": "lcurve"}}  # ← or "corr" default is lcurve
+        {"num_eigenmodes": 390, "lambda_selection": "pareto"}}  # ← or "corr" default is lcurve
 ]
 
 processing_pipeline = ProcessingPipeline(config)
 experiment = processing_pipeline.apply(experiment)
+
 
 
 """ Check correlations """
@@ -48,11 +49,12 @@ tstat_firsts = []
 for session in experiment.sessions:
     for task in session.protocol.tasks:
         print(f"Task: {task}")
-        reconstructed_tstats = session.processed_data["t_HbO_reconstructed"][task]
+        reconstructed_tstats_HbO = session.processed_data["t_HbO_reconstructed"][task]
+        reconstructed_tstats_HbR = session.processed_data["t_HbR_reconstructed"][task]
         print(f"Bad channels: {session.processed_data["bad_channels"]}")
         print(f"Number of bad channels: {len(session.processed_data["bad_channels"])}")
         mri_tstats = get_mri_tstats(session.patient.name, task)
-        corr = np.corrcoef(reconstructed_tstats, mri_tstats)[0, 1]
+        corr = np.corrcoef(reconstructed_tstats_HbO, mri_tstats)[0, 1]
         tstat_firsts.append(corr)
         print(f"Correlation: {corr}")
 
