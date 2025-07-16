@@ -35,8 +35,8 @@ def canonical_double_gamma_hrf(tr=1.0, duration=30.0):
 
 def detect_bad_channels(raw_wl1: np.ndarray,
                         raw_wl2: np.ndarray,
-                        cv_high_thresh: float = 0.15,
-                        cv_low_thresh: float  = 0.001
+                        cv_high_thresh: float = 0.50,
+                        cv_low_thresh: float  = 0.005
                         ) -> list[int]:
     """
     Identify bad source–detector channels based on coefficient of variation
@@ -519,40 +519,651 @@ class ReconstructDual(ProcessingStep):
 #         return phi @ α[:eigvals.size], phi @ α[eigvals.size:]
 
 
+# class ReconstructDualWithoutBadChannels(ProcessingStep):
+#     """
+#     Dual-wavelength eigen-mode reconstruction with bad-channel pruning.
+#     Supported hyper-parameter pickers (keyword *lambda_selection*):
+#         "corr"   – maximise fNIRS–fMRI correlation            (1-D)
+#         "lcurve" – classic 2-term L-curve corner              (1-D)
+#         "pareto" – 3-term Pareto-surface corner               (2-D)
+#         "gcv"    – two-parameter Generalised Cross-Validation (2-D)
+#     All pickers now return a pair (λ*, μ*).  If μ* is None the
+#     solver falls back to the default coupling μ=0.1.
+#     """
+#
+#     # ---------- constructor -------------------------------------------------
+#     def __init__(self, num_eigenmodes: int, lambda_selection: str = "lcurve"):
+#         if lambda_selection not in ("corr", "lcurve", "pareto", "gcv"):
+#             raise ValueError("lambda_selection must be "
+#                              "'corr', 'lcurve', 'pareto' or 'gcv'")
+#         self.num_eigenmodes   = num_eigenmodes
+#         self.lambda_selection = lambda_selection
+#
+#     # =======================================================================
+#     # 1-D pickers kept from the original code
+#     # =======================================================================
+#     def _find_best_lambda_corr(self, B1, B2, y1, y2,
+#                                phi, eigvals, verts, fmri, bad):
+#         params  = np.logspace(-5, 5, 65)
+#         best_r, best = -np.inf, params[0]
+#         for lam in params:
+#             X, _ = self._reconstruct(B1, B2, y1, y2, phi, lam, eigvals,
+#                                      bad_channels=bad)
+#             r = np.corrcoef(X, fmri)[0, 1]
+#             if r > best_r:
+#                 best_r, best = r, lam
+#         return best, None          # (λ*, μ*)
+#
+#     @staticmethod
+#     def _curv(xm, x, xp, ym, y, yp):
+#         dx1, dx2 = x - xm, xp - x;  dy1, dy2 = y - ym, yp - y
+#         dx = .5*(dx1+dx2);  dy = .5*(dy1+dy2)
+#         ddx = dx2 - dx1;    ddy = dy2 - dy1
+#         return abs(ddx*dy - ddy*dx) / ((dx*dx+dy*dy)**1.5 + 1e-12)
+#
+#     def _find_best_lambda_lcurve(self, B1, B2, y1, y2,
+#                                  phi, eigvals, verts, fmri, bad):
+#         εO1, εR1, εO2, εR2 = 586, 1548.52, 1058, 691.32
+#         M1 = np.hstack((εO1*B1, εR1*B1));  M2 = np.hstack((εO2*B2, εR2*B2))
+#         B  = np.vstack((M1, M2))
+#         y  = np.concatenate((y1.flatten(order='F'), y2.flatten(order='F')))
+#         if bad:
+#             m = B1.shape[0]
+#             mask = np.ones(B.shape[0], bool)
+#             mask[bad] = False; mask[m+np.array(bad)] = False
+#             B, y = B[mask], y[mask]
+#
+#         Λ = np.diag(np.tile(eigvals, 2))
+#         n = eigvals.size; I = np.eye(n); rho, mu = -0.6, 0.1
+#         C = mu*np.block([[I, -rho*I], [-rho*I, rho**2*I]])
+#
+#         lam_grid = np.logspace(-5, 5, 65)
+#         res, sol = [], []
+#         for lam in lam_grid:
+#             α = np.linalg.solve(B.T@B + lam*Λ + C, B.T@y)
+#             res.append(np.linalg.norm(B@α - y))
+#             sol.append(np.linalg.norm(np.sqrt(Λ)@α))
+#
+#         log_r, log_s = np.log10(res), np.log10(sol)
+#         curv = [0]+[self._curv(log_r[i-1],log_r[i],log_r[i+1],
+#                                log_s[i-1],log_s[i],log_s[i+1])
+#                     for i in range(1,len(lam_grid)-1)]+[0]
+#         return float(lam_grid[int(np.argmax(curv))]), None
+#
+#     # =======================================================================
+#     # 2-D pickers – NEW
+#     # =======================================================================
+#     def _find_best_param_pareto(self, B1, B2, y1, y2,
+#                                 phi, eigvals, verts, fmri, bad,
+#                                 lam_grid=np.logspace(-5,5,31),
+#                                 mu_grid =np.logspace(-5,5,31),
+#                                 ext=(586,1548.52,1058,691.32),
+#                                 w=(1.,1.), rho=-.6):
+#         εO1, εR1, εO2, εR2 = ext
+#         M1 = np.hstack((εO1*B1, εR1*B1));  M2 = np.hstack((εO2*B2, εR2*B2))
+#         B  = np.vstack((w[0]*M1, w[1]*M2))
+#         y  = np.concatenate((w[0]*y1.flatten(order='F'),
+#                              w[1]*y2.flatten(order='F')))
+#         if bad:
+#             m = B1.shape[0]
+#             mask = np.ones(B.shape[0], bool)
+#             mask[bad] = False; mask[m+np.array(bad)] = False
+#             B, y = B[mask], y[mask]
+#
+#         n = eigvals.size
+#         Λ = np.diag(np.tile(eigvals, 2))
+#         I = np.eye(n)
+#         P = np.block([[ I, -rho*I], [-rho*I, rho**2*I]])
+#
+#         R = np.empty((len(lam_grid), len(mu_grid)))
+#         S = np.empty_like(R)
+#         C = np.empty_like(R)
+#         for i, lam in enumerate(lam_grid):
+#             for j, mu in enumerate(mu_grid):
+#                 A  = B.T @ B + lam*Λ + mu*P
+#                 α  = np.linalg.solve(A, B.T@y)
+#                 R[i,j] = np.linalg.norm(B@α - y)
+#                 S[i,j] = np.linalg.norm(np.sqrt(Λ)@α)
+#                 C[i,j] = np.linalg.norm(P@α)
+#
+#         r, s, c = np.log10(R), np.log10(S), np.log10(C)
+#         dr_dλ = np.gradient(r, np.log10(lam_grid), axis=0)
+#         dr_dμ = np.gradient(r, np.log10(mu_grid),  axis=1)
+#         ds_dλ = np.gradient(s, np.log10(lam_grid), axis=0)
+#         ds_dμ = np.gradient(s, np.log10(mu_grid),  axis=1)
+#         dc_dλ = np.gradient(c, np.log10(lam_grid), axis=0)
+#         dc_dμ = np.gradient(c, np.log10(mu_grid),  axis=1)
+#
+#         tx = np.stack([dr_dλ, ds_dλ, dc_dλ], axis=-1)
+#         ty = np.stack([dr_dμ, ds_dμ, dc_dμ], axis=-1)
+#         κ  = np.linalg.norm(np.cross(tx, ty), axis=-1) \
+#              / (np.linalg.norm(tx, axis=-1)**2 *
+#                 np.linalg.norm(ty, axis=-1)**2)**0.5
+#         i, j = np.unravel_index(np.argmax(κ), κ.shape)
+#         return float(lam_grid[i]), float(mu_grid[j])
+#
+#     def _find_best_param_gcv(self, B1, B2, y1, y2,
+#                              phi, eigvals, verts, fmri, bad,
+#                              lam_grid=np.logspace(-5,5,31),
+#                              mu_grid =np.logspace(-5,5,31),
+#                              ext=(586,1548.52,1058,691.32),
+#                              w=(1.,1.), rho=-.6):
+#         εO1, εR1, εO2, εR2 = ext
+#         M1 = np.hstack((εO1*B1, εR1*B1));  M2 = np.hstack((εO2*B2, εR2*B2))
+#         B  = np.vstack((w[0]*M1, w[1]*M2))
+#         y  = np.concatenate((w[0]*y1.flatten(order='F'),
+#                              w[1]*y2.flatten(order='F')))
+#         if bad:
+#             m = B1.shape[0]
+#             mask = np.ones(B.shape[0], bool)
+#             mask[bad] = False; mask[m+np.array(bad)] = False
+#             B, y = B[mask], y[mask]
+#
+#         m  = B.shape[0]
+#         Λ  = np.diag(np.tile(eigvals, 2))
+#         n  = eigvals.size
+#         I  = np.eye(n)
+#         P  = np.block([[ I, -rho*I], [-rho*I, rho**2*I]])
+#
+#         best, best_gcv = (lam_grid[0], mu_grid[0]), np.inf
+#         for lam in lam_grid:
+#             for mu in mu_grid:
+#                 A       = B.T@B + lam*Λ + mu*P
+#                 A_invBT = np.linalg.solve(A, B.T)
+#                 α       = A_invBT @ y
+#                 res     = y - B @ α
+#                 rss     = res @ res
+#                 trH     = np.trace(B @ A_invBT)
+#                 #gcv     = rss / (m - trH)**2 if m > trH else np.inf
+#                 # inside _find_best_param_gcv  (two lines)
+#                 df_target = 0.2 * m  # 20 % effective d.o.f.
+#                 penalty = (trH - df_target) ** 2 / m  # new
+#
+#                 gcv = rss / m ** 2 + penalty  # replace old gcv
+#
+#                 if gcv < best_gcv:
+#                     best_gcv, best = gcv, (lam, mu)
+#         return float(best[0]), float(best[1])
+#
+#     # =======================================================================
+#     # selector returning the chosen pair
+#     # =======================================================================
+#     def _pick_params(self, *args, **kw):
+#         sel = self.lambda_selection
+#         if   sel == "corr":   f = self._find_best_lambda_corr
+#         elif sel == "lcurve": f = self._find_best_lambda_lcurve
+#         elif sel == "pareto": f = self._find_best_param_pareto
+#         elif sel == "gcv":    f = self._find_best_param_gcv
+#         else: raise RuntimeError
+#         return f(*args, **kw)
+#
+#     # =======================================================================
+#     # remaining helpers (unchanged) – _compute_Bmn and _reconstruct
+#     # =======================================================================
+#     def _compute_Bmn(self, vj: np.ndarray, phi: np.ndarray) -> np.ndarray:
+#         B = np.einsum("nsd,nm->sdm", vj, phi)
+#         S, D, M = B.shape
+#         return B.reshape(S * D, M, order="F")
+#
+#     def _reconstruct(self, B1, B2, y1, y2, phi, lam, eigvals,
+#                      *, ext=(586,1548.52,1058,691.32),
+#                      w=(1.,1.), rho=-0.6, mu=0.1,
+#                      eps=0.5, bad_channels:list[int] = []):
+#         εO1, εR1, εO2, εR2 = ext
+#         M1 = np.hstack((εO1*B1, εR1*B1))
+#         M2 = np.hstack((εO2*B2, εR2*B2))
+#         B  = np.vstack((w[0]*M1, w[1]*M2))
+#         y  = np.concatenate((w[0]*y1.flatten(order="F"),
+#                              w[1]*y2.flatten(order="F")))
+#         if bad_channels:
+#             m = B1.shape[0]
+#             mask = np.ones(B.shape[0], bool)
+#             mask[bad_channels] = False
+#             mask[m+np.array(bad_channels)] = False
+#             B, y = B[mask], y[mask]
+#
+#         Λ = np.diag(np.tile(eigvals, 2))
+#         n = eigvals.size
+#         I = np.eye(n)
+#         C = mu * np.block([[rho**2*I, -rho*I],
+#                            [-rho*I,    I   ]])
+#
+#         α = np.linalg.solve(B.T@B + lam*Λ + C, B.T@y)
+#         α_O, α_R = α[:n], α[n:]
+#         # if eps is not None:
+#         #     mismatch = np.abs(α_R - rho*α_O)/(np.sqrt(α_O**2+α_R**2)+1e-12)
+#         #     keep = mismatch <= eps
+#         #     α_O, α_R = α_O*keep, α_R*keep
+#         return phi @ α_O, phi @ α_R
+#
+#     # =======================================================================
+#     # main entry point (same logic, now two parameters)
+#     # =======================================================================
+#     def _do_process(self, session:"Session") -> None:
+#         verts = session.patient.mesh.vertices
+#         if session.patient.mesh.eigenmodes is None:
+#             raise ValueError("Mesh has no eigenmodes.")
+#         s, e = 2, 2+self.num_eigenmodes
+#         phi   = np.vstack(session.patient.mesh.eigenmodes[s:e]).T
+#         eigvals = np.array([em.eigenvalue for em in
+#                             session.patient.mesh.eigenmodes[s:e]])
+#         eigvals[0] = 0.0
+#
+#         vj1 = session.jacobians[0].sample_at_vertices(verts)
+#         vj2 = session.jacobians[1].sample_at_vertices(verts)
+#         B1  = self._compute_Bmn(vj1, phi)
+#         B2  = self._compute_Bmn(vj2, phi)
+#         bad = session.processed_data.get("bad_channels", [])
+#
+#         tO = session.processed_data["t_HbO"]
+#         tR = session.processed_data["t_HbR"]
+#         session.processed_data["t_HbO_reconstructed"] = {}
+#         session.processed_data["t_HbR_reconstructed"] = {}
+#
+#         from lys.utils.mri_tstat import get_mri_tstats
+#         for task in session.protocol.tasks:
+#             y1, y2 = tO[task], tR[task]
+#             fmri   = get_mri_tstats(session.patient.name, task)
+#
+#             lam, mu = self._pick_params(B1, B2, y1, y2,
+#                                         phi, eigvals, verts, fmri, bad)
+#             if mu is None:   # 1-D pickers
+#                 mu = 0.1
+#             print(f"Task {task:<15}  λ*={lam:.3g}  μ*={mu:.3g}")
+#
+#             HbO, HbR = self._reconstruct(B1, B2, y1, y2, phi,
+#                                          lam, eigvals, mu=mu,
+#                                          bad_channels=bad)
+#             session.processed_data["t_HbO_reconstructed"][task] = HbO
+#             session.processed_data["t_HbR_reconstructed"][task] = HbR
+#
+#         del session.processed_data["t_HbO"]
+#         del session.processed_data["t_HbR"]
+# class ReconstructDualWithoutBadChannels(ProcessingStep):
+#     """
+#     Dual-wavelength eigen-mode reconstruction with bad-channel pruning.
+#
+#     lambda_selection choices
+#         "corr"     – maximise fNIRS–fMRI correlation (1-D λ)
+#         "lcurve"   – 2-term L-curve corner           (1-D λ)
+#         "pareto"   – 3-term Pareto curvature         (2-D λ,μ)
+#         "gcv"      – two-parameter GCV               (2-D λ,μ)
+#         "evidence" – Bayesian evidence (type-II ML)  (1-D λ)
+#
+#     If `mu_fixed` is supplied μ never varies – every picker reduces to a
+#     1-D search in λ.
+#     """
+#
+#     # ------------------------------------------------------------------ #
+#     # constructor
+#     # ------------------------------------------------------------------ #
+#     def __init__(self,
+#                  num_eigenmodes: int,
+#                  lambda_selection: str = "lcurve",
+#                  mu_fixed: float | None = None):
+#         if lambda_selection not in ("corr", "lcurve", "pareto", "gcv", "evidence"):
+#             raise ValueError("lambda_selection must be "
+#                              "'corr', 'lcurve', 'pareto', 'gcv' or 'evidence'")
+#         self.num_eigenmodes   = num_eigenmodes
+#         self.lambda_selection = lambda_selection
+#         self.mu_fixed         = mu_fixed        # None → free μ, else constant
+#
+#     # ------------------------------------------------------------------ #
+#     # helpers
+#     # ------------------------------------------------------------------ #
+#     def _mu(self) -> float:
+#         """Current fixed-μ value or the historical default 0.1."""
+#         return 0.1 if self.mu_fixed is None else self.mu_fixed
+#
+#     @staticmethod
+#     def _curv(xm, x, xp, ym, y, yp):
+#         dx1, dx2 = x - xm, xp - x;  dy1, dy2 = y - ym, yp - y
+#         dx = .5*(dx1+dx2);  dy = .5*(dy1+dy2)
+#         ddx = dx2 - dx1;    ddy = dy2 - dy1
+#         return abs(ddx*dy - ddy*dx) / ((dx*dx+dy*dy)**1.5 + 1e-12)
+#
+#     # ------------------------------------------------------------------ #
+#     # 1-D pickers (λ only)
+#     # ------------------------------------------------------------------ #
+#     def _find_best_lambda_corr(self, B1, B2, y1, y2,
+#                                phi, eigvals, verts, fmri, bad):
+#         lam_grid = np.logspace(-5, 5, 65)
+#         best_r, best_lam = -np.inf, lam_grid[0]
+#         mu = self._mu()
+#         for lam in lam_grid:
+#             X, _ = self._reconstruct(B1, B2, y1, y2, phi, lam, eigvals,
+#                                      mu=mu, bad_channels=bad)
+#             r = np.corrcoef(X, fmri)[0, 1]
+#             if r > best_r:
+#                 best_r, best_lam = r, lam
+#         return best_lam, mu
+#
+#     def _find_best_lambda_lcurve(self, B1, B2, y1, y2,
+#                                  phi, eigvals, verts, fmri, bad):
+#         εO1, εR1, εO2, εR2 = 586, 1548.52, 1058, 691.32
+#         M1 = np.hstack((εO1*B1, εR1*B1));  M2 = np.hstack((εO2*B2, εR2*B2))
+#         B  = np.vstack((M1, M2))
+#         y  = np.concatenate((y1.flatten(order='F'), y2.flatten(order='F')))
+#         if bad:
+#             m = B1.shape[0]
+#             mask = np.ones(B.shape[0], bool)
+#             mask[bad] = False;  mask[m+np.array(bad)] = False
+#             B, y = B[mask], y[mask]
+#
+#         Λ = np.diag(np.tile(eigvals, 2))
+#         n = eigvals.size; I = np.eye(n)
+#         mu = self._mu(); rho = -0.6
+#         C = mu*np.block([[I, -rho*I], [-rho*I, rho**2*I]])
+#
+#         lam_grid = np.logspace(-5, 5, 65)
+#         res, sol = [], []
+#         for lam in lam_grid:
+#             α = np.linalg.solve(B.T@B + lam*Λ + C, B.T@y)
+#             res.append(np.linalg.norm(B@α - y))
+#             sol.append(np.linalg.norm(np.sqrt(Λ)@α))
+#
+#         log_r, log_s = np.log10(res), np.log10(sol)
+#         curv = [0]+[self._curv(log_r[i-1],log_r[i],log_r[i+1],
+#                                log_s[i-1],log_s[i],log_s[i+1])
+#                     for i in range(1,len(lam_grid)-1)]+[0]
+#         return float(lam_grid[int(np.argmax(curv))]), mu
+#
+#     # ------------------------------------------------------------------ #
+#     # 2-D pickers (λ,μ) – collapse to 1-D if mu_fixed set
+#     # ------------------------------------------------------------------ #
+#     def _find_best_param_gcv(self, B1, B2, y1, y2,
+#                              phi, eigvals, verts, fmri, bad,
+#                              lam_grid=np.logspace(-5,5,31),
+#                              mu_grid =np.logspace(-5,5,31),
+#                              ext=(586,1548.52,1058,691.32),
+#                              w=(1.,1.), rho=-.6):
+#         if self.mu_fixed is not None:
+#             mu_grid = np.asarray([self.mu_fixed])
+#
+#         εO1, εR1, εO2, εR2 = ext
+#         M1 = np.hstack((εO1*B1, εR1*B1));  M2 = np.hstack((εO2*B2, εR2*B2))
+#         B  = np.vstack((w[0]*M1, w[1]*M2))
+#         y  = np.concatenate((w[0]*y1.flatten(order='F'),
+#                              w[1]*y2.flatten(order='F')))
+#         if bad:
+#             m0 = B1.shape[0]
+#             mask = np.ones(B.shape[0], bool)
+#             mask[bad] = False; mask[m0+np.array(bad)] = False
+#             B, y = B[mask], y[mask]
+#
+#         m  = B.shape[0]
+#         Λ  = np.diag(np.tile(eigvals, 2))
+#         n  = eigvals.size
+#         I  = np.eye(n); best, best_gcv = (lam_grid[0], mu_grid[0]), np.inf
+#
+#         for lam in lam_grid:
+#             for mu in mu_grid:
+#                 P  = np.block([[ I, -rho*I], [-rho*I, rho**2*I]]) * mu
+#                 A  = B.T@B + lam*Λ + P
+#                 A_invBT = np.linalg.solve(A, B.T)
+#                 α   = A_invBT @ y
+#                 res = y - B @ α
+#                 rss = res @ res
+#                 trH = np.trace(B @ A_invBT)
+#                 if m <= trH:      # avoid division by zero / negative
+#                     continue
+#                 gcv = rss / (m - trH)**2
+#                 if gcv < best_gcv:
+#                     best_gcv, best = gcv, (lam, mu)
+#         return float(best[0]), float(best[1])
+#
+#     def _find_best_param_pareto(self, B1, B2, y1, y2,
+#                                 phi, eigvals, verts, fmri, bad,
+#                                 lam_grid=np.logspace(-5,5,31),
+#                                 mu_grid =np.logspace(-5,5,31),
+#                                 ext=(586,1548.52,1058,691.32),
+#                                 w=(1.,1.), rho=-.6):
+#         if self.mu_fixed is not None:
+#             mu_grid = np.asarray([self.mu_fixed])
+#
+#         εO1, εR1, εO2, εR2 = ext
+#         M1 = np.hstack((εO1*B1, εR1*B1));  M2 = np.hstack((εO2*B2, εR2*B2))
+#         B  = np.vstack((w[0]*M1, w[1]*M2))
+#         y  = np.concatenate((w[0]*y1.flatten(order='F'),
+#                              w[1]*y2.flatten(order='F')))
+#         if bad:
+#             m0 = B1.shape[0]
+#             mask = np.ones(B.shape[0], bool)
+#             mask[bad] = False;  mask[m0+np.array(bad)] = False
+#             B, y = B[mask], y[mask]
+#
+#         Λ = np.diag(np.tile(eigvals, 2))
+#         n = eigvals.size; I = np.eye(n)
+#
+#         R = np.empty((len(lam_grid), len(mu_grid)))
+#         S = np.empty_like(R);   Cmat = np.empty_like(R)
+#
+#         for i, lam in enumerate(lam_grid):
+#             for j, mu in enumerate(mu_grid):
+#                 P = np.block([[ I, -rho*I], [-rho*I, rho**2*I]]) * mu
+#                 A = B.T@B + lam*Λ + P
+#                 α = np.linalg.solve(A, B.T@y)
+#                 R[i,j] = np.linalg.norm(B@α - y)
+#                 S[i,j] = np.linalg.norm(np.sqrt(Λ)@α)
+#                 Cmat[i,j] = np.linalg.norm(P@α)
+#
+#         r, s, c = np.log10(R), np.log10(S), np.log10(Cmat)
+#         dr_dλ = np.gradient(r, np.log10(lam_grid), axis=0)
+#         dr_dμ = np.gradient(r, np.log10(mu_grid), axis=1)
+#         ds_dλ = np.gradient(s, np.log10(lam_grid), axis=0)
+#         ds_dμ = np.gradient(s, np.log10(mu_grid), axis=1)
+#         dc_dλ = np.gradient(c, np.log10(lam_grid), axis=0)
+#         dc_dμ = np.gradient(c, np.log10(mu_grid), axis=1)
+#
+#         tx = np.stack([dr_dλ, ds_dλ, dc_dλ], axis=-1)
+#         ty = np.stack([dr_dμ, ds_dμ, dc_dμ], axis=-1)
+#         κ  = np.linalg.norm(np.cross(tx, ty), axis=-1) \
+#              / (np.linalg.norm(tx, axis=-1)**2 *
+#                 np.linalg.norm(ty, axis=-1)**2)**0.5
+#         i, j = np.unravel_index(np.argmax(κ), κ.shape)
+#         return float(lam_grid[i]), float(mu_grid[j])
+#
+#     # ------------------------------------------------------------------ #
+#     # Bayesian evidence picker (λ only, μ may be fixed)
+#     # ------------------------------------------------------------------ #
+#     def _find_best_lambda_evidence(self, B1, B2, y1, y2,
+#                                    phi, eigvals, verts, fmri, bad,
+#                                    lam_grid=np.logspace(-5,5,65),
+#                                    ext=(586,1548.52,1058,691.32),
+#                                    w=(1.,1.), rho=-.6):
+#         mu = self._mu()
+#         εO1, εR1, εO2, εR2 = ext
+#         M1 = np.hstack((εO1*B1, εR1*B1));  M2 = np.hstack((εO2*B2, εR2*B2))
+#         B  = np.vstack((w[0]*M1, w[1]*M2))
+#         y  = np.concatenate((w[0]*y1.flatten(order='F'),
+#                              w[1]*y2.flatten(order='F')))
+#         if bad:
+#             m0 = B1.shape[0]
+#             mask = np.ones(B.shape[0], bool)
+#             mask[bad] = False; mask[m0+np.array(bad)] = False
+#             B, y = B[mask], y[mask]
+#
+#         m   = B.shape[0]
+#         Λ   = np.diag(np.tile(eigvals, 2))
+#         n   = eigvals.size; I = np.eye(n)
+#         P   = mu * np.block([[ I, -rho*I], [-rho*I, rho**2*I]])
+#
+#         best_logE, best_lam = -np.inf, lam_grid[0]
+#         for lam in lam_grid:
+#             A = B.T @ B + lam*Λ + P
+#             α = np.linalg.solve(A, B.T @ y)
+#             residual = y - B @ α
+#             rss = residual @ residual
+#             Σp = np.linalg.pinv(lam*Λ + P)                  # prior cov, take Moore-Penrose inverse
+#             tr_SigmaBB = np.trace(Σp @ (B.T @ B))
+#             sigma2 = (rss + tr_SigmaBB) / m
+#
+#             C  = B @ Σp @ B.T + sigma2 * np.eye(m)
+#
+#             sign, logdetC = np.linalg.slogdet(C)
+#             if sign <= 0:      # numerical issue → skip
+#                 continue
+#             logE = -0.5*(m*np.log(rss/m) + logdetC)
+#             if logE > best_logE:
+#                 best_logE, best_lam = logE, lam
+#
+#         return float(best_lam), mu
+#
+#     # ------------------------------------------------------------------ #
+#     # universal dispatcher
+#     # ------------------------------------------------------------------ #
+#     def _pick_params(self, *args, **kw):
+#         sel = self.lambda_selection
+#         if   sel == "corr":     f = self._find_best_lambda_corr
+#         elif sel == "lcurve":   f = self._find_best_lambda_lcurve
+#         elif sel == "pareto":   f = self._find_best_param_pareto
+#         elif sel == "gcv":      f = self._find_best_param_gcv
+#         elif sel == "evidence": f = self._find_best_lambda_evidence
+#         else:                   raise RuntimeError
+#         return f(*args, **kw)   # returns (λ*, μ*)
+#
+#     # ------------------------------------------------------------------ #
+#     # linear-algebra helpers (unchanged except for μ being passed in)
+#     # ------------------------------------------------------------------ #
+#     def _compute_Bmn(self, vj: np.ndarray, phi: np.ndarray) -> np.ndarray:
+#         B = np.einsum("nsd,nm->sdm", vj, phi)
+#         S, D, M = B.shape
+#         return B.reshape(S * D, M, order="F")
+#
+#     def _reconstruct(self,
+#                      B1, B2, y1, y2, phi, lam, eigvals,
+#                      *, ext=(586,1548.52,1058,691.32),
+#                      w=(1.,1.), rho=-0.6, mu=0.1,
+#                      eps=0.5, bad_channels:list[int] = []):
+#         εO1, εR1, εO2, εR2 = ext
+#         M1 = np.hstack((εO1*B1, εR1*B1))
+#         M2 = np.hstack((εO2*B2, εR2*B2))
+#         B  = np.vstack((w[0]*M1, w[1]*M2))
+#         y  = np.concatenate((w[0]*y1.flatten(order="F"),
+#                              w[1]*y2.flatten(order="F")))
+#         if bad_channels:
+#             m0 = B1.shape[0]
+#             mask = np.ones(B.shape[0], bool)
+#             mask[bad_channels] = False
+#             mask[m0+np.array(bad_channels)] = False
+#             B, y = B[mask], y[mask]
+#
+#         Λ = np.diag(np.tile(eigvals, 2))
+#         n = eigvals.size
+#         I = np.eye(n)
+#         C = mu * np.block([[rho**2*I, -rho*I],
+#                            [-rho*I,    I   ]])
+#
+#         α = np.linalg.solve(B.T@B + lam*Λ + C, B.T@y)
+#         α_O, α_R = α[:n], α[n:]
+#
+#         if eps is not None:
+#             mismatch = np.abs(α_R - rho*α_O)/(np.sqrt(α_O**2+α_R**2)+1e-12)
+#             keep = mismatch <= eps
+#             α_O, α_R = α_O*keep, α_R*keep
+#
+#         return phi @ α_O, phi @ α_R
+#
+#     # ------------------------------------------------------------------ #
+#     # main entry point
+#     # ------------------------------------------------------------------ #
+#     def _do_process(self, session:"Session") -> None:
+#         verts = session.patient.mesh.vertices
+#         if session.patient.mesh.eigenmodes is None:
+#             raise ValueError("Mesh has no eigenmodes.")
+#         s, e = 2, 2 + self.num_eigenmodes
+#         phi   = np.vstack(session.patient.mesh.eigenmodes[s:e]).T
+#         eigvals = np.array([em.eigenvalue for em in
+#                             session.patient.mesh.eigenmodes[s:e]])
+#         eigvals[0] = 0.0
+#
+#         vj1 = session.jacobians[0].sample_at_vertices(verts)
+#         vj2 = session.jacobians[1].sample_at_vertices(verts)
+#         B1  = self._compute_Bmn(vj1, phi)
+#         B2  = self._compute_Bmn(vj2, phi)
+#         bad = session.processed_data.get("bad_channels", [])
+#
+#         tO = session.processed_data["t_HbO"]
+#         tR = session.processed_data["t_HbR"]
+#         session.processed_data["t_HbO_reconstructed"] = {}
+#         session.processed_data["t_HbR_reconstructed"] = {}
+#
+#         from lys.utils.mri_tstat import get_mri_tstats
+#         for task in session.protocol.tasks:
+#             y1, y2 = tO[task], tR[task]
+#             fmri   = get_mri_tstats(session.patient.name, task)
+#
+#             lam, mu = self._pick_params(B1, B2, y1, y2,
+#                                         phi, eigvals, verts, fmri, bad)
+#             HbO, HbR = self._reconstruct(
+#                 B1, B2, y1, y2, phi, lam, eigvals,
+#                 mu=mu, bad_channels=bad
+#             )
+#             print(f"Task {task:<15}  λ*={lam:.3g}  μ*={mu:.3g}")
+#
+#             session.processed_data["t_HbO_reconstructed"][task] = HbO
+#             session.processed_data["t_HbR_reconstructed"][task] = HbR
+#
+#         del session.processed_data["t_HbO"]
+#         del session.processed_data["t_HbR"]
+
+import numpy as np
+from typing import List, Tuple
+from lys.interfaces.processing_step import ProcessingStep
+
 class ReconstructDualWithoutBadChannels(ProcessingStep):
     """
-    Dual-wavelength eigen-mode reconstruction with bad-channel pruning.
-    Supported hyper-parameter pickers (keyword *lambda_selection*):
-        "corr"   – maximise fNIRS–fMRI correlation            (1-D)
-        "lcurve" – classic 2-term L-curve corner              (1-D)
-        "pareto" – 3-term Pareto-surface corner               (2-D)
-        "gcv"    – two-parameter Generalised Cross-Validation (2-D)
-    All pickers now return a pair (λ*, μ*).  If μ* is None the
-    solver falls back to the default coupling μ=0.1.
+    Dual‑wavelength eigen‑mode reconstruction with bad‑channel pruning.
+
+    lambda_selection choices
+        "manual"      – use user‑supplied λ
+        "corr"        – maximise fNIRS–fMRI correlation
+        "lcurve"      – 2‑term L‑curve corner (λ only)
+        "pareto"      – 3‑term Pareto‑surface curvature (λ, μ)
+        "gcv"         – generalised cross‑validation (λ, μ)
+        "evidence"    – Bayesian evidence (type‑II ML)        (λ only)
+        "sure"        – Stein’s unbiased risk estimate / C_p  (λ only)
+        "discrepancy" – Morozov discrepancy principle         (λ only)
+        "quasiopt"    – quasi‑optimality (Hanke–Raus)         (λ only)
+        "cv"          – K‑fold row‑wise cross‑validation      (λ only)
+
+    If `mu_fixed` is supplied, μ never varies – every picker collapses to
+    a 1‑D search in λ.
     """
 
-    # ---------- constructor -------------------------------------------------
-    def __init__(self, num_eigenmodes: int, lambda_selection: str = "lcurve"):
-        if lambda_selection not in ("corr", "lcurve", "pareto", "gcv"):
-            raise ValueError("lambda_selection must be "
-                             "'corr', 'lcurve', 'pareto' or 'gcv'")
+    # ------------------------------------------------------------------ #
+    # constructor
+    # ------------------------------------------------------------------ #
+    def __init__(self,
+                 num_eigenmodes : int,
+                 lambda_selection : str = "lcurve",
+                 mu_fixed        : float | None = None,
+                 manual_lambda   : float | None = None,
+                 noise_sigma     : float | None = None,
+                 cv_folds        : int = 5):
+        valid = {"manual","corr","lcurve","pareto","gcv","evidence",
+                 "sure","discrepancy","quasiopt","cv"}
+        if lambda_selection not in valid:
+            raise ValueError(f"lambda_selection must be one of {sorted(valid)}")
+        if lambda_selection == "manual" and manual_lambda is None:
+            raise ValueError("manual_lambda must be given for manual mode")
+        if lambda_selection in ("sure","discrepancy") and noise_sigma is None:
+            raise ValueError("noise_sigma must be supplied for 'sure' or "
+                             "'discrepancy' mode")
+
         self.num_eigenmodes   = num_eigenmodes
         self.lambda_selection = lambda_selection
+        self.mu_fixed         = mu_fixed
+        self.manual_lambda    = manual_lambda
+        self.noise_sigma      = noise_sigma
+        self.cv_folds         = cv_folds
 
-    # =======================================================================
-    # 1-D pickers kept from the original code
-    # =======================================================================
-    def _find_best_lambda_corr(self, B1, B2, y1, y2,
-                               phi, eigvals, verts, fmri, bad):
-        params  = np.logspace(-5, 5, 65)
-        best_r, best = -np.inf, params[0]
-        for lam in params:
-            X, _ = self._reconstruct(B1, B2, y1, y2, phi, lam, eigvals,
-                                     bad_channels=bad)
-            r = np.corrcoef(X, fmri)[0, 1]
-            if r > best_r:
-                best_r, best = r, lam
-        return best, None          # (λ*, μ*)
+    # ------------------------------------------------------------------ #
+    # helpers
+    # ------------------------------------------------------------------ #
+    def _mu(self) -> float:
+        """Fixed μ value or default 0.1."""
+        return 0.1 if self.mu_fixed is None else self.mu_fixed
 
     @staticmethod
     def _curv(xm, x, xp, ym, y, yp):
@@ -561,215 +1172,325 @@ class ReconstructDualWithoutBadChannels(ProcessingStep):
         ddx = dx2 - dx1;    ddy = dy2 - dy1
         return abs(ddx*dy - ddy*dx) / ((dx*dx+dy*dy)**1.5 + 1e-12)
 
-    def _find_best_lambda_lcurve(self, B1, B2, y1, y2,
-                                 phi, eigvals, verts, fmri, bad):
-        εO1, εR1, εO2, εR2 = 586, 1548.52, 1058, 691.32
-        M1 = np.hstack((εO1*B1, εR1*B1));  M2 = np.hstack((εO2*B2, εR2*B2))
-        B  = np.vstack((M1, M2))
-        y  = np.concatenate((y1.flatten(order='F'), y2.flatten(order='F')))
-        if bad:
-            m = B1.shape[0]
-            mask = np.ones(B.shape[0], bool)
-            mask[bad] = False; mask[m+np.array(bad)] = False
-            B, y = B[mask], y[mask]
+    # ------------------------------------------------------------------ #
+    # 0) MANUAL λ
+    # ------------------------------------------------------------------ #
+    def _find_best_lambda_manual(self,*a,**k):
+        return float(self.manual_lambda), self._mu()
 
-        Λ = np.diag(np.tile(eigvals, 2))
-        n = eigvals.size; I = np.eye(n); rho, mu = -0.6, 0.1
-        C = mu*np.block([[I, -rho*I], [-rho*I, rho**2*I]])
-
-        lam_grid = np.logspace(-5, 5, 65)
-        res, sol = [], []
+    # ------------------------------------------------------------------ #
+    # 1) correlation picker
+    # ------------------------------------------------------------------ #
+    def _find_best_lambda_corr(self,B1,B2,y1,y2,phi,eig,verts,fmri,bad):
+        lam_grid = np.logspace(-5,5,65); best_r=-np.inf; best=lam_grid[0]
+        mu=self._mu()
         for lam in lam_grid:
-            α = np.linalg.solve(B.T@B + lam*Λ + C, B.T@y)
+            X,_ = self._reconstruct(B1,B2,y1,y2,phi,lam,eig,
+                                    mu=mu,bad_channels=bad)
+            r=np.corrcoef(X,fmri)[0,1]
+            if r>best_r: best_r, best=r, lam
+        return float(best), mu
+
+    # ------------------------------------------------------------------ #
+    # 2) L‑curve picker
+    # ------------------------------------------------------------------ #
+    def _find_best_lambda_lcurve(self,B1,B2,y1,y2,phi,eig,verts,fmri,bad):
+        εO1,εR1,εO2,εR2=586,1548.52,1058,691.32
+        M1=np.hstack((εO1*B1,εR1*B1));M2=np.hstack((εO2*B2,εR2*B2))
+        B=np.vstack((M1,M2)); y=np.concatenate((y1.flatten('F'),y2.flatten('F')))
+        if bad:
+            m0=B1.shape[0]; mask=np.ones(B.shape[0],bool)
+            mask[bad]=False; mask[m0+np.array(bad)]=False; B,y=B[mask],y[mask]
+        Λ=np.diag(np.tile(eig,2)); n=eig.size; I=np.eye(n)
+        mu=self._mu(); rho=-.6
+        C=mu*np.block([[I,-rho*I],[-rho*I,rho**2*I]])
+
+        lam_grid=np.logspace(-5,5,65); res,sol=[],[]
+        for lam in lam_grid:
+            α=np.linalg.solve(B.T@B+lam*Λ+C,B.T@y)
             res.append(np.linalg.norm(B@α - y))
             sol.append(np.linalg.norm(np.sqrt(Λ)@α))
+        lr,ls=np.log10(res),np.log10(sol)
+        curv=[0]+[self._curv(lr[i-1],lr[i],lr[i+1],
+                             ls[i-1],ls[i],ls[i+1])
+                  for i in range(1,len(lam_grid)-1)]+[0]
+        lam=float(lam_grid[int(np.argmax(curv))])
+        return lam, mu
 
-        log_r, log_s = np.log10(res), np.log10(sol)
-        curv = [0]+[self._curv(log_r[i-1],log_r[i],log_r[i+1],
-                               log_s[i-1],log_s[i],log_s[i+1])
-                    for i in range(1,len(lam_grid)-1)]+[0]
-        return float(lam_grid[int(np.argmax(curv))]), None
-
-    # =======================================================================
-    # 2-D pickers – NEW
-    # =======================================================================
-    def _find_best_param_pareto(self, B1, B2, y1, y2,
-                                phi, eigvals, verts, fmri, bad,
-                                lam_grid=np.logspace(-5,5,31),
-                                mu_grid =np.logspace(-5,5,31),
-                                ext=(586,1548.52,1058,691.32),
-                                w=(1.,1.), rho=-.6):
-        εO1, εR1, εO2, εR2 = ext
-        M1 = np.hstack((εO1*B1, εR1*B1));  M2 = np.hstack((εO2*B2, εR2*B2))
-        B  = np.vstack((w[0]*M1, w[1]*M2))
-        y  = np.concatenate((w[0]*y1.flatten(order='F'),
-                             w[1]*y2.flatten(order='F')))
-        if bad:
-            m = B1.shape[0]
-            mask = np.ones(B.shape[0], bool)
-            mask[bad] = False; mask[m+np.array(bad)] = False
-            B, y = B[mask], y[mask]
-
-        n = eigvals.size
-        Λ = np.diag(np.tile(eigvals, 2))
-        I = np.eye(n)
-        P = np.block([[ I, -rho*I], [-rho*I, rho**2*I]])
-
-        R = np.empty((len(lam_grid), len(mu_grid)))
-        S = np.empty_like(R)
-        C = np.empty_like(R)
-        for i, lam in enumerate(lam_grid):
-            for j, mu in enumerate(mu_grid):
-                A  = B.T @ B + lam*Λ + mu*P
-                α  = np.linalg.solve(A, B.T@y)
-                R[i,j] = np.linalg.norm(B@α - y)
-                S[i,j] = np.linalg.norm(np.sqrt(Λ)@α)
-                C[i,j] = np.linalg.norm(P@α)
-
-        r, s, c = np.log10(R), np.log10(S), np.log10(C)
-        dr_dλ = np.gradient(r, np.log10(lam_grid), axis=0)
-        dr_dμ = np.gradient(r, np.log10(mu_grid),  axis=1)
-        ds_dλ = np.gradient(s, np.log10(lam_grid), axis=0)
-        ds_dμ = np.gradient(s, np.log10(mu_grid),  axis=1)
-        dc_dλ = np.gradient(c, np.log10(lam_grid), axis=0)
-        dc_dμ = np.gradient(c, np.log10(mu_grid),  axis=1)
-
-        tx = np.stack([dr_dλ, ds_dλ, dc_dλ], axis=-1)
-        ty = np.stack([dr_dμ, ds_dμ, dc_dμ], axis=-1)
-        κ  = np.linalg.norm(np.cross(tx, ty), axis=-1) \
-             / (np.linalg.norm(tx, axis=-1)**2 *
-                np.linalg.norm(ty, axis=-1)**2)**0.5
-        i, j = np.unravel_index(np.argmax(κ), κ.shape)
-        return float(lam_grid[i]), float(mu_grid[j])
-
-    def _find_best_param_gcv(self, B1, B2, y1, y2,
-                             phi, eigvals, verts, fmri, bad,
+    # ------------------------------------------------------------------ #
+    # 3) GCV picker  (λ,μ)
+    # ------------------------------------------------------------------ #
+    def _find_best_param_gcv(self,B1,B2,y1,y2,phi,eig,verts,fmri,bad,
                              lam_grid=np.logspace(-5,5,31),
-                             mu_grid =np.logspace(-5,5,31),
-                             ext=(586,1548.52,1058,691.32),
-                             w=(1.,1.), rho=-.6):
-        εO1, εR1, εO2, εR2 = ext
-        M1 = np.hstack((εO1*B1, εR1*B1));  M2 = np.hstack((εO2*B2, εR2*B2))
-        B  = np.vstack((w[0]*M1, w[1]*M2))
-        y  = np.concatenate((w[0]*y1.flatten(order='F'),
-                             w[1]*y2.flatten(order='F')))
+                             mu_grid=np.logspace(-5,5,31),
+                             rho=-.6):
+        if self.mu_fixed is not None:
+            mu_grid=np.asarray([self.mu_fixed])
+        εO1,εR1,εO2,εR2=586,1548.52,1058,691.32
+        M1=np.hstack((εO1*B1,εR1*B1));M2=np.hstack((εO2*B2,εR2*B2))
+        B=np.vstack((M1,M2)); y=np.concatenate((y1.flatten('F'),y2.flatten('F')))
         if bad:
-            m = B1.shape[0]
-            mask = np.ones(B.shape[0], bool)
-            mask[bad] = False; mask[m+np.array(bad)] = False
-            B, y = B[mask], y[mask]
-
-        m  = B.shape[0]
-        Λ  = np.diag(np.tile(eigvals, 2))
-        n  = eigvals.size
-        I  = np.eye(n)
-        P  = np.block([[ I, -rho*I], [-rho*I, rho**2*I]])
-
-        best, best_gcv = (lam_grid[0], mu_grid[0]), np.inf
+            m0=B1.shape[0]; mask=np.ones(B.shape[0],bool)
+            mask[bad]=False; mask[m0+np.array(bad)]=False; B,y=B[mask],y[mask]
+        m=B.shape[0]; Λ=np.diag(np.tile(eig,2)); n=eig.size; I=np.eye(n)
+        best=(lam_grid[0],mu_grid[0]); best_gcv=np.inf
         for lam in lam_grid:
             for mu in mu_grid:
-                A       = B.T@B + lam*Λ + mu*P
-                A_invBT = np.linalg.solve(A, B.T)
-                α       = A_invBT @ y
-                res     = y - B @ α
-                rss     = res @ res
-                trH     = np.trace(B @ A_invBT)
-                gcv     = rss / (m - trH)**2 if m > trH else np.inf
-                if gcv < best_gcv:
-                    best_gcv, best = gcv, (lam, mu)
+                P=mu*np.block([[I,-rho*I],[-rho*I,rho**2*I]])
+                A=B.T@B+lam*Λ+P
+                A_invBT=np.linalg.solve(A,B.T)
+                α=A_invBT@y
+                rss=float(y@y - y@B@α)
+                trH=float(np.trace(B@A_invBT))
+                if trH>=m: continue
+                gcv=rss/(m-trH)**2
+                if gcv<best_gcv: best_gcv, best = gcv,(lam,mu)
         return float(best[0]), float(best[1])
 
-    # =======================================================================
-    # selector returning the chosen pair
-    # =======================================================================
-    def _pick_params(self, *args, **kw):
-        sel = self.lambda_selection
-        if   sel == "corr":   f = self._find_best_lambda_corr
-        elif sel == "lcurve": f = self._find_best_lambda_lcurve
-        elif sel == "pareto": f = self._find_best_param_pareto
-        elif sel == "gcv":    f = self._find_best_param_gcv
-        else: raise RuntimeError
-        return f(*args, **kw)
+    # ------------------------------------------------------------------ #
+    # 4) Pareto picker  (λ,μ)
+    # ------------------------------------------------------------------ #
+    def _find_best_param_pareto(self,B1,B2,y1,y2,phi,eig,verts,fmri,bad,
+                                lam_grid=np.logspace(-5,5,31),
+                                mu_grid=np.logspace(-5,5,31),
+                                rho=-.6):
+        if self.mu_fixed is not None:
+            mu_grid=np.asarray([self.mu_fixed])
+        εO1,εR1,εO2,εR2=586,1548.52,1058,691.32
+        M1=np.hstack((εO1*B1,εR1*B1));M2=np.hstack((εO2*B2,εR2*B2))
+        B=np.vstack((M1,M2)); y=np.concatenate((y1.flatten('F'),y2.flatten('F')))
+        if bad:
+            m0=B1.shape[0]; mask=np.ones(B.shape[0],bool)
+            mask[bad]=False; mask[m0+np.array(bad)]=False; B,y=B[mask],y[mask]
+        Λ=np.diag(np.tile(eig,2)); n=eig.size; I=np.eye(n)
+        R,S,C=np.empty((len(lam_grid),len(mu_grid))),\
+               np.empty_like(R),np.empty_like(R)
+        for i,lam in enumerate(lam_grid):
+            for j,mu in enumerate(mu_grid):
+                P=mu*np.block([[I,-rho*I],[-rho*I,rho**2*I]])
+                A=B.T@B+lam*Λ+P; α=np.linalg.solve(A,B.T@y)
+                R[i,j]=np.linalg.norm(B@α - y)
+                S[i,j]=np.linalg.norm(np.sqrt(Λ)@α)
+                C[i,j]=np.linalg.norm(P@α)
+        r,s,c=np.log10(R),np.log10(S),np.log10(C)
+        dr_dλ=np.gradient(r,np.log10(lam_grid),axis=0)
+        dr_dμ=np.gradient(r,np.log10(mu_grid),axis=1)
+        ds_dλ=np.gradient(s,np.log10(lam_grid),axis=0)
+        ds_dμ=np.gradient(s,np.log10(mu_grid),axis=1)
+        dc_dλ=np.gradient(c,np.log10(lam_grid),axis=0)
+        dc_dμ=np.gradient(c,np.log10(mu_grid),axis=1)
+        tx=np.stack([dr_dλ,ds_dλ,dc_dλ],axis=-1)
+        ty=np.stack([dr_dμ,ds_dμ,dc_dμ],axis=-1)
+        κ=np.linalg.norm(np.cross(tx,ty),axis=-1) / \
+          (np.linalg.norm(tx,axis=-1)**2 * np.linalg.norm(ty,axis=-1)**2)**0.5
+        i,j=np.unravel_index(np.argmax(κ),κ.shape)
+        return float(lam_grid[i]), float(mu_grid[j])
 
-    # =======================================================================
-    # remaining helpers (unchanged) – _compute_Bmn and _reconstruct
-    # =======================================================================
-    def _compute_Bmn(self, vj: np.ndarray, phi: np.ndarray) -> np.ndarray:
-        B = np.einsum("nsd,nm->sdm", vj, phi)
-        S, D, M = B.shape
-        return B.reshape(S * D, M, order="F")
+    # ------------------------------------------------------------------ #
+    # 5) Bayesian evidence picker
+    # ------------------------------------------------------------------ #
+    def _find_best_lambda_evidence(self,B1,B2,y1,y2,phi,eig,verts,fmri,bad,
+                                   lam_grid=np.logspace(-5,5,65),
+                                   rho=-.6):
+        mu=self._mu()
+        εO1,εR1,εO2,εR2=586,1548.52,1058,691.32
+        M1=np.hstack((εO1*B1,εR1*B1));M2=np.hstack((εO2*B2,εR2*B2))
+        B=np.vstack((M1,M2)); y=np.concatenate((y1.flatten('F'),y2.flatten('F')))
+        if bad:
+            m0=B1.shape[0]; mask=np.ones(B.shape[0],bool)
+            mask[bad]=False; mask[m0+np.array(bad)]=False; B,y=B[mask],y[mask]
+        m=B.shape[0]; Λ=np.diag(np.tile(eig,2)); n=eig.size; I=np.eye(n)
+        P=mu*np.block([[I,-rho*I],[-rho*I,rho**2*I]])
+        best_logE=-np.inf; best_lam=lam_grid[0]
+        for lam in lam_grid:
+            Prior=lam*Λ+P; Σp=np.linalg.pinv(Prior)
+            A=B.T@B+Prior; α=np.linalg.solve(A,B.T@y)
+            rss=float(np.linalg.norm(y-B@α)**2)
+            tr_SigmaBB=float(np.trace(Σp@(B.T@B)))
+            sigma2=(rss+tr_SigmaBB)/m
+            C=B@Σp@B.T+sigma2*np.eye(m)
+            sign,ldet=np.linalg.slogdet(C)
+            if sign<=0: continue
+            logE=-0.5*(m*np.log(sigma2)+ldet)
+            if logE>best_logE: best_logE, best_lam = logE, lam
+        return float(best_lam), mu
 
-    def _reconstruct(self, B1, B2, y1, y2, phi, lam, eigvals,
-                     *, ext=(586,1548.52,1058,691.32),
-                     w=(1.,1.), rho=-0.6, mu=0.1,
-                     eps=0.5, bad_channels:list[int] = []):
-        εO1, εR1, εO2, εR2 = ext
-        M1 = np.hstack((εO1*B1, εR1*B1))
-        M2 = np.hstack((εO2*B2, εR2*B2))
-        B  = np.vstack((w[0]*M1, w[1]*M2))
-        y  = np.concatenate((w[0]*y1.flatten(order="F"),
-                             w[1]*y2.flatten(order="F")))
+    # ------------------------------------------------------------------ #
+    # 6) SURE picker
+    # ------------------------------------------------------------------ #
+    def _find_best_lambda_sure(self,B1,B2,y1,y2,phi,eig,verts,fmri,bad,
+                               lam_grid=np.logspace(-5,5,65),rho=-.6):
+        σ2=self.noise_sigma**2; mu=self._mu()
+        εO1,εR1,εO2,εR2=586,1548.52,1058,691.32
+        M1=np.hstack((εO1*B1,εR1*B1));M2=np.hstack((εO2*B2,εR2*B2))
+        B=np.vstack((M1,M2)); y=np.concatenate((y1.flatten('F'),y2.flatten('F')))
+        if bad:
+            m0=B1.shape[0]; mask=np.ones(B.shape[0],bool)
+            mask[bad]=False; mask[m0+np.array(bad)]=False; B,y=B[mask],y[mask]
+        m=B.shape[0]; Λ=np.diag(np.tile(eig,2)); n=eig.size; I=np.eye(n)
+        best_lam=lam_grid[0]; best_sure=np.inf
+        for lam in lam_grid:
+            P=mu*np.block([[I,-rho*I],[-rho*I,rho**2*I]])
+            A=B.T@B+lam*Λ+P; A_invBT=np.linalg.solve(A,B.T)
+            α=A_invBT@y; rss=float(np.linalg.norm(y-B@α)**2)
+            trH=float(np.trace(B@A_invBT))
+            sure=rss - m*σ2 + 2*σ2*trH
+            if sure<best_sure: best_sure,sure,best_lam=sure,sure,lam
+        return float(best_lam), mu
+
+    # ------------------------------------------------------------------ #
+    # 7) Morozov discrepancy
+    # ------------------------------------------------------------------ #
+    def _find_best_lambda_discrepancy(self,B1,B2,y1,y2,phi,eig,verts,fmri,bad,
+                                      lam_grid=np.logspace(-5,5,65),rho=-.6):
+        target=B1.shape[0]*self.noise_sigma**2
+        mu=self._mu()
+        εO1,εR1,εO2,εR2=586,1548.52,1058,691.32
+        M1=np.hstack((εO1*B1,εR1*B1));M2=np.hstack((εO2*B2,εR2*B2))
+        B=np.vstack((M1,M2)); y=np.concatenate((y1.flatten('F'),y2.flatten('F')))
+        if bad:
+            m0=B1.shape[0]; mask=np.ones(B.shape[0],bool)
+            mask[bad]=False; mask[m0+np.array(bad)]=False; B,y=B[mask],y[mask]
+        Λ=np.diag(np.tile(eig,2))
+        for lam in lam_grid:                # increasing λ ⇒ larger residual
+            α,_=self._solve(B,y,Λ,lam,mu)
+            rss=float(np.linalg.norm(y-B@α)**2)
+            if rss>=target: return float(lam), mu
+        return float(lam_grid[-1]), mu
+
+    # ------------------------------------------------------------------ #
+    # 8) quasi‑optimality
+    # ------------------------------------------------------------------ #
+    def _find_best_lambda_quasiopt(self,B1,B2,y1,y2,phi,eig,verts,fmri,bad,
+                                   lam_grid=np.logspace(-5,5,65),rho=-.6):
+        mu=self._mu()
+        εO1,εR1,εO2,εR2=586,1548.52,1058,691.32
+        M1=np.hstack((εO1*B1,εR1*B1));M2=np.hstack((εO2*B2,εR2*B2))
+        B=np.vstack((M1,M2)); y=np.concatenate((y1.flatten('F'),y2.flatten('F')))
+        if bad:
+            m0=B1.shape[0]; mask=np.ones(B.shape[0],bool)
+            mask[bad]=False; mask[m0+np.array(bad)]=False; B,y=B[mask],y[mask]
+        Λ=np.diag(np.tile(eig,2)); sols=[]
+        for lam in lam_grid:
+            α,_=self._solve(B,y,Λ,lam,mu)
+            sols.append(α)
+        diffs=[np.linalg.norm(sols[i]-sols[i+1]) for i in range(len(sols)-1)]
+        idx=int(np.argmin(diffs)); return float(lam_grid[idx+1]), mu
+
+    # ------------------------------------------------------------------ #
+    # 9) K‑fold cross‑validation
+    # ------------------------------------------------------------------ #
+    def _find_best_lambda_cv(self,B1,B2,y1,y2,phi,eig,verts,fmri,bad,
+                             lam_grid=np.logspace(-5,5,31),rho=-.6):
+        mu=self._mu()
+        εO1,εR1,εO2,εR2=586,1548.52,1058,691.32
+        M1=np.hstack((εO1*B1,εR1*B1));M2=np.hstack((εO2*B2,εR2*B2))
+        B=np.vstack((M1,M2)); y=np.concatenate((y1.flatten('F'),y2.flatten('F')))
+        if bad:
+            m0=B1.shape[0]; mask=np.ones(B.shape[0],bool)
+            mask[bad]=False; mask[m0+np.array(bad)]=False; B,y=B[mask],y[mask]
+        m=B.shape[0]; Λ=np.diag(np.tile(eig,2))
+        idx=np.arange(m); np.random.shuffle(idx)
+        folds=np.array_split(idx,self.cv_folds)
+        best_lam=lam_grid[0]; best_err=np.inf
+        for lam in lam_grid:
+            cv_err=0.0
+            for f in folds:
+                train=np.setdiff1d(idx,f); Bt,yt=B[train],y[train]
+                α,_=self._solve(Bt,yt,Λ,lam,mu)
+                cv_err += np.linalg.norm(B[f]@α - y[f])**2
+            if cv_err<best_err: best_err, best_lam=cv_err,lam
+        return float(best_lam), mu
+
+    # ------------------------------------------------------------------ #
+    # universal dispatcher
+    # ------------------------------------------------------------------ #
+    def _pick_params(self,*a,**k):
+        d={
+            "manual":      self._find_best_lambda_manual,
+            "corr":        self._find_best_lambda_corr,
+            "lcurve":      self._find_best_lambda_lcurve,
+            "pareto":      self._find_best_param_pareto,
+            "gcv":         self._find_best_param_gcv,
+            "evidence":    self._find_best_lambda_evidence,
+            "sure":        self._find_best_lambda_sure,
+            "discrepancy": self._find_best_lambda_discrepancy,
+            "quasiopt":    self._find_best_lambda_quasiopt,
+            "cv":          self._find_best_lambda_cv,
+        }
+        return d[self.lambda_selection](*a,**k)   # → (λ*, μ*)
+
+    # ------------------------------------------------------------------ #
+    # tiny linear‑algebra helpers
+    # ------------------------------------------------------------------ #
+    def _solve(self,B,y,Λ,lam,mu,rho=-.6)->Tuple[np.ndarray,float]:
+        n=Λ.shape[0]//2; I=np.eye(n)
+        C=mu*np.block([[I,-rho*I],[-rho*I,rho**2*I]])
+        A=B.T@B+lam*Λ+C
+        α=np.linalg.solve(A,B.T@y); res=y-B@α
+        return α, float(res@res)
+
+    def _compute_Bmn(self,vj:np.ndarray,phi:np.ndarray)->np.ndarray:
+        B=np.einsum("nsd,nm->sdm",vj,phi); S,D,M=B.shape
+        return B.reshape(S*D,M,order="F")
+
+    def _reconstruct(self,B1,B2,y1,y2,phi,lam,eigvals,*,
+                     ext=(586,1548.52,1058,691.32),w=(1.,1.),
+                     rho=-.6,mu=0.1,eps=0.5,bad_channels:List[int]=[]):
+        εO1,εR1,εO2,εR2=ext
+        M1=np.hstack((εO1*B1,εR1*B1));M2=np.hstack((εO2*B2,εR2*B2))
+        B=np.vstack((w[0]*M1,w[1]*M2))
+        y=np.concatenate((w[0]*y1.flatten('F'),
+                          w[1]*y2.flatten('F')))
         if bad_channels:
-            m = B1.shape[0]
-            mask = np.ones(B.shape[0], bool)
-            mask[bad_channels] = False
-            mask[m+np.array(bad_channels)] = False
-            B, y = B[mask], y[mask]
+            m0=B1.shape[0]; mask=np.ones(B.shape[0],bool)
+            mask[bad_channels]=False
+            mask[m0+np.array(bad_channels)]=False
+            B,y=B[mask],y[mask]
+        Λ=np.diag(np.tile(eigvals,2)); n=eigvals.size; I=np.eye(n)
+        C=mu*np.block([[rho**2*I,-rho*I],[-rho*I, I]])
+        α=np.linalg.solve(B.T@B+lam*Λ+C,B.T@y)
+        α_O,α_R=α[:n],α[n:]
+        if eps is not None:
+            mismatch=np.abs(α_R-rho*α_O)/(np.sqrt(α_O**2+α_R**2)+1e-12)
+            keep=mismatch<=eps; α_O*=keep; α_R*=keep
+        return phi@α_O, phi@α_R
 
-        Λ = np.diag(np.tile(eigvals, 2))
-        n = eigvals.size
-        I = np.eye(n)
-        C = mu * np.block([[rho**2*I, -rho*I],
-                           [-rho*I,    I   ]])
-
-        α = np.linalg.solve(B.T@B + lam*Λ + C, B.T@y)
-        α_O, α_R = α[:n], α[n:]
-        # if eps is not None:
-        #     mismatch = np.abs(α_R - rho*α_O)/(np.sqrt(α_O**2+α_R**2)+1e-12)
-        #     keep = mismatch <= eps
-        #     α_O, α_R = α_O*keep, α_R*keep
-        return phi @ α_O, phi @ α_R
-
-    # =======================================================================
-    # main entry point (same logic, now two parameters)
-    # =======================================================================
-    def _do_process(self, session:"Session") -> None:
-        verts = session.patient.mesh.vertices
+    # ------------------------------------------------------------------ #
+    # main entry point
+    # ------------------------------------------------------------------ #
+    def _do_process(self,session:"Session")->None:
+        verts=session.patient.mesh.vertices
         if session.patient.mesh.eigenmodes is None:
             raise ValueError("Mesh has no eigenmodes.")
-        s, e = 2, 2+self.num_eigenmodes
-        phi   = np.vstack(session.patient.mesh.eigenmodes[s:e]).T
-        eigvals = np.array([em.eigenvalue for em in
-                            session.patient.mesh.eigenmodes[s:e]])
-        eigvals[0] = 0.0
+        s,e=2,2+self.num_eigenmodes
+        phi=np.vstack(session.patient.mesh.eigenmodes[s:e]).T
+        eigvals=np.array([eigen.eigenvalue
+                          for eigen in session.patient.mesh.eigenmodes[s:e]])
+        eigvals[0]=0.0
 
-        vj1 = session.jacobians[0].sample_at_vertices(verts)
-        vj2 = session.jacobians[1].sample_at_vertices(verts)
-        B1  = self._compute_Bmn(vj1, phi)
-        B2  = self._compute_Bmn(vj2, phi)
-        bad = session.processed_data.get("bad_channels", [])
+        vj1=session.jacobians[0].sample_at_vertices(verts)
+        vj2=session.jacobians[1].sample_at_vertices(verts)
+        B1=self._compute_Bmn(vj1,phi)
+        B2=self._compute_Bmn(vj2,phi)
+        bad=session.processed_data.get("bad_channels",[])
 
-        tO = session.processed_data["t_HbO"]
-        tR = session.processed_data["t_HbR"]
-        session.processed_data["t_HbO_reconstructed"] = {}
-        session.processed_data["t_HbR_reconstructed"] = {}
+        tO=session.processed_data["t_HbO"]
+        tR=session.processed_data["t_HbR"]
+        session.processed_data["t_HbO_reconstructed"]={}
+        session.processed_data["t_HbR_reconstructed"]={}
 
         from lys.utils.mri_tstat import get_mri_tstats
         for task in session.protocol.tasks:
-            y1, y2 = tO[task], tR[task]
-            fmri   = get_mri_tstats(session.patient.name, task)
-
-            lam, mu = self._pick_params(B1, B2, y1, y2,
-                                        phi, eigvals, verts, fmri, bad)
-            if mu is None:   # 1-D pickers
-                mu = 0.1
-            print(f"Task {task:<15}  λ*={lam:.3g}  μ*={mu:.3g}")
-
-            HbO, HbR = self._reconstruct(B1, B2, y1, y2, phi,
-                                         lam, eigvals, mu=mu,
-                                         bad_channels=bad)
-            session.processed_data["t_HbO_reconstructed"][task] = HbO
-            session.processed_data["t_HbR_reconstructed"][task] = HbR
+            y1,y2=tO[task],tR[task]
+            fmri=get_mri_tstats(session.patient.name,task)
+            lam,mu=self._pick_params(B1,B2,y1,y2,phi,eigvals,
+                                     verts,fmri,bad)
+            HbO,HbR=self._reconstruct(B1,B2,y1,y2,phi,lam,eigvals,
+                                      mu=mu,bad_channels=bad)
+            print(f"Task {task:<15} λ*={lam:.3g} μ*={mu:.3g}")
+            session.processed_data["t_HbO_reconstructed"][task]=HbO
+            session.processed_data["t_HbR_reconstructed"][task]=HbR
 
         del session.processed_data["t_HbO"]
         del session.processed_data["t_HbR"]
