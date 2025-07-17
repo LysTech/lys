@@ -34,6 +34,117 @@ class PerceivedWordEvent(Event):
         }
 
 
+class PerceivedSpeechTaskExecutor(TaskExecutor):
+    """
+    TaskExecutor for perceived speech tasks. Streams PerceivedWordEvent, PauseEvent, ResumeEvent, etc. in real time.
+    Integrates with an AudioPlayerInterface GUI for real-time control and logging.
+    Uses a thread-safe queue to yield events as they occur.
+    Log file is now always saved in the session_path directory as 'perceived_speech_log.jsonl'.
+    """
+    def __init__(self, transcript_path: Path, audio_path: Path):
+        super().__init__()
+        self.transcript_path = transcript_path
+        self.audio_path = audio_path
+        self.log_file = None
+        self.event_queue = queue.Queue()
+        self._stopped = False
+        self.player = None
+        self.widget = None
+        self.app = None
+
+    def log_event(self, event: Event):
+        if self.log_file:
+            self.log_file.write(json.dumps(event.to_dict()) + "\n")
+            self.log_file.flush()
+
+    def on_word(self, word: dict):
+        event = PerceivedWordEvent(
+            word=word['word'],
+            start_ms=word['start_ms'],
+            end_ms=word['end_ms'],
+            confidence=word['confidence']
+        )
+        self.event_queue.put(event)
+
+    def on_pause(self):
+        self.event_queue.put(PauseEvent())
+
+    def on_resume(self):
+        self.event_queue.put(ResumeEvent())
+
+    def on_stop(self):
+        self._stopped = True
+        self.event_queue.put(None) # None is a stop signal
+
+    def event_stream(self, session_path: Path) -> Iterator[Event]:
+        """
+        Yield events from the queue as they arrive. Ends when a stop event is received.
+        """
+        while True:
+            try:
+                event = self.event_queue.get_nowait()
+                if event is None:  # Stop signal
+                    break
+                yield event
+            except queue.Empty:
+                if self._stopped:
+                    break
+                time.sleep(0.01)
+
+    def _start(self, session_path: Path):
+        """
+        Start the perceived speech task executor. The log file is created in the session_path directory as 'perceived_speech_log_{timestamp}.jsonl', where timestamp is in YYYYMMDD_HHMMSS format.
+        """
+        import sys
+        from PyQt5.QtWidgets import QApplication
+        from datetime import datetime
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_path = session_path / f"perceived_speech_log_{timestamp}.jsonl"
+        session_path.mkdir(parents=True, exist_ok=True)
+        self.log_file = open(log_path, 'w')
+
+        self.app = QApplication(sys.argv)
+        self.player = SoundDeviceAudioPlayer(self.audio_path, self.transcript_path, timing_offset_ms=100)
+        self.widget = PerceivedSpeechWidget(self.player)
+        self.widget.show()
+
+        # Connect player signals to event queue
+        self.player.word_boundary.connect(self.on_word)
+        self.player.playback_finished.connect(self._on_playback_finished)
+
+        # Connect GUI close to stop
+        self.widget.destroyed.connect(self.player.stop)
+
+        # Connect player stop to event queue
+        # (if you want to log stop events, you can connect here)
+
+        # Use a QTimer to periodically check the event queue and log events
+        from PyQt5.QtCore import QTimer
+        def poll_event_queue():
+            while True:
+                try:
+                    event = self.event_queue.get_nowait()
+                    if event is None:
+                        if self.app is not None:
+                            self.app.quit()
+                        return
+                    self.log_event(event)
+                except queue.Empty:
+                    break
+        self.poll_timer = QTimer()
+        self.poll_timer.timeout.connect(poll_event_queue)
+        self.poll_timer.start(50)
+
+        self.app.exec_()
+
+    def _on_playback_finished(self):
+        # Called when playback is finished
+        if self.widget is not None:
+            self.widget.close()
+        # The widget's closeEvent will stop the player and trigger app.quit via event queue
+
+
 class SoundDeviceAudioPlayer(QObject):
     """
     Audio player using sounddevice for reliable, sample-accurate playback.
@@ -284,121 +395,9 @@ class PerceivedSpeechWidget(QWidget):
         event.accept()
 
 
-class PerceivedSpeechTaskExecutor(TaskExecutor):
-    """
-    TaskExecutor for perceived speech tasks. Streams PerceivedWordEvent, PauseEvent, ResumeEvent, etc. in real time.
-    Integrates with an AudioPlayerInterface GUI for real-time control and logging.
-    Uses a thread-safe queue to yield events as they occur.
-    Log file is now always saved in the session_path directory as 'perceived_speech_log.jsonl'.
-    """
-    def __init__(self, transcript_path: Path, audio_path: Path):
-        super().__init__()
-        self.transcript_path = transcript_path
-        self.audio_path = audio_path
-        self.log_file = None
-        self.event_queue = queue.Queue()
-        self._stopped = False
-        self.player = None
-        self.widget = None
-        self.app = None
-
-    def log_event(self, event: Event):
-        if self.log_file:
-            self.log_file.write(json.dumps(event.to_dict()) + "\n")
-            self.log_file.flush()
-
-    def on_word(self, word: dict):
-        event = PerceivedWordEvent(
-            word=word['word'],
-            start_ms=word['start_ms'],
-            end_ms=word['end_ms'],
-            confidence=word['confidence']
-        )
-        self.event_queue.put(event)
-
-    def on_pause(self):
-        self.event_queue.put(PauseEvent())
-
-    def on_resume(self):
-        self.event_queue.put(ResumeEvent())
-
-    def on_stop(self):
-        self._stopped = True
-        self.event_queue.put(None) # None is a stop signal
-
-    def event_stream(self, session_path: Path) -> Iterator[Event]:
-        """
-        Yield events from the queue as they arrive. Ends when a stop event is received.
-        """
-        while True:
-            try:
-                event = self.event_queue.get_nowait()
-                if event is None:  # Stop signal
-                    break
-                yield event
-            except queue.Empty:
-                if self._stopped:
-                    break
-                time.sleep(0.01)
-
-    def _start(self, session_path: Path):
-        """
-        Start the perceived speech task executor. The log file is created in the session_path directory as 'perceived_speech_log_{timestamp}.jsonl', where timestamp is in YYYYMMDD_HHMMSS format.
-        """
-        import sys
-        from PyQt5.QtWidgets import QApplication
-        from datetime import datetime
-
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_path = session_path / f"perceived_speech_log_{timestamp}.jsonl"
-        session_path.mkdir(parents=True, exist_ok=True)
-        self.log_file = open(log_path, 'w')
-
-        self.app = QApplication(sys.argv)
-        self.player = SoundDeviceAudioPlayer(self.audio_path, self.transcript_path, timing_offset_ms=100)
-        self.widget = PerceivedSpeechWidget(self.player)
-        self.widget.show()
-
-        # Connect player signals to event queue
-        self.player.word_boundary.connect(self.on_word)
-        self.player.playback_finished.connect(self._on_playback_finished)
-
-        # Connect GUI close to stop
-        self.widget.destroyed.connect(self.player.stop)
-
-        # Connect player stop to event queue
-        # (if you want to log stop events, you can connect here)
-
-        # Use a QTimer to periodically check the event queue and log events
-        from PyQt5.QtCore import QTimer
-        def poll_event_queue():
-            while True:
-                try:
-                    event = self.event_queue.get_nowait()
-                    if event is None:
-                        if self.app is not None:
-                            self.app.quit()
-                        return
-                    self.log_event(event)
-                except queue.Empty:
-                    break
-        self.poll_timer = QTimer()
-        self.poll_timer.timeout.connect(poll_event_queue)
-        self.poll_timer.start(50)
-
-        self.app.exec_()
-
-    def _on_playback_finished(self):
-        # Called when playback is finished
-        if self.widget is not None:
-            self.widget.close()
-        # The widget's closeEvent will stop the player and trigger app.quit via event queue
-
-# --- Main block ---
 if __name__ == "__main__":
     audio_path = Path("churchill_chapter1_16k_mono.wav")
     transcript_path = Path("transcription.txt")
-    # session_path is unused in this executor, but required by interface
     session_path = Path(".")
     executor = PerceivedSpeechTaskExecutor(transcript_path, audio_path)
     executor.start(session_path)
