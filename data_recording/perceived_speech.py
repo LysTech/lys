@@ -7,15 +7,13 @@ from lys.interfaces.event import Event, PauseEvent, ResumeEvent
 from lys.interfaces.task_executor import TaskExecutor
 import time
 from PyQt5.QtWidgets import QWidget, QPushButton, QHBoxLayout, QApplication
-from PyQt5.QtCore import QTimer, pyqtSignal
+from PyQt5.QtCore import QTimer, pyqtSignal, QObject
 import sys
 import queue
 import sounddevice as sd
 import soundfile as sf
 from PyQt5.QtWidgets import QLabel
 import numpy as np
-
-#TODO: it's bad that i don't currently do executor.run() in the main block
 
 
 class PerceivedWordEvent(Event):
@@ -36,41 +34,18 @@ class PerceivedWordEvent(Event):
         }
 
 
-class AudioPlayerInterface:
+class SoundDeviceAudioPlayer(QObject):
     """
-    Interface for an audio player. Concrete implementations should implement these methods.
+    Audio player using sounddevice for reliable, sample-accurate playback.
+    Emits signals for playback finished and word boundary events.
+    No GUI code.
     """
-    def play(self):
-        raise NotImplementedError
-    def pause(self):
-        raise NotImplementedError
-    def resume(self):
-        raise NotImplementedError
-    def stop(self):
-        raise NotImplementedError
-    def is_playing(self) -> bool:
-        raise NotImplementedError
-    def set_on_word_boundary(self, callback):
-        """Register a callback for word boundary events."""
-        raise NotImplementedError
-    def set_on_pause(self, callback):
-        raise NotImplementedError
-    def set_on_resume(self, callback):
-        raise NotImplementedError
-    def set_on_stop(self, callback):
-        raise NotImplementedError
-
-
-class SoundDeviceAudioPlayer(AudioPlayerInterface, QWidget):
-    """
-    Audio player using sounddevice for reliable, sample-accurate playback,
-    with PyQt5 GUI controls and word display.
-    """
-    playbackFinished = pyqtSignal()
+    playback_finished = pyqtSignal()
+    word_boundary = pyqtSignal(dict)
 
     def __init__(self, audio_path: Path, transcript_path: Path, timing_offset_ms: int = 75):
         super().__init__()
-        QWidget.__init__(self)
+        QObject.__init__(self)
 
         self.audio_path = audio_path
         self.transcript_path = transcript_path
@@ -83,28 +58,6 @@ class SoundDeviceAudioPlayer(AudioPlayerInterface, QWidget):
         self.current_frame = 0
         self.paused = False
 
-        self.play_button = QPushButton('Play')
-        self.pause_button = QPushButton('Pause')
-        self.resume_button = QPushButton('Resume')
-        self.stop_button = QPushButton('Stop')
-        self.word_label = QLabel('')
-
-        self.play_button.clicked.connect(self.play)
-        self.pause_button.clicked.connect(self.pause)
-        self.resume_button.clicked.connect(self.resume)
-        self.stop_button.clicked.connect(self.stop)
-
-        layout = QHBoxLayout()
-        layout.addWidget(self.play_button)
-        layout.addWidget(self.pause_button)
-        layout.addWidget(self.resume_button)
-        layout.addWidget(self.stop_button)
-        layout.addWidget(self.word_label)
-        self.setLayout(layout)
-
-        # Connect the finished signal to the main-thread handler
-        self.playbackFinished.connect(self.on_playback_finished_main_thread)
-
         # Load and parse transcript
         self.words = self._parse_transcript(transcript_path)
         if self.words:
@@ -112,15 +65,14 @@ class SoundDeviceAudioPlayer(AudioPlayerInterface, QWidget):
             for word in self.words:
                 word['start_ms'] -= offset
                 word['end_ms'] -= offset
-        
         self.word_index = 0
-        self._on_word_boundary = None
+
+        self.timer = QTimer()
+        self.timer.timeout.connect(self._check_word_boundary)
+
         self._on_pause = None
         self._on_resume = None
         self._on_stop = None
-
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self._check_word_boundary)
 
     @staticmethod
     def _parse_transcript(transcript_path: Path) -> List[Dict[str, Any]]:
@@ -195,22 +147,7 @@ class SoundDeviceAudioPlayer(AudioPlayerInterface, QWidget):
         This method MUST be thread-safe. Do not interact with GUI elements directly.
         """
         print("Playback finished callback from audio thread.")
-        self.playbackFinished.emit()
-
-    def on_playback_finished_main_thread(self):
-        """This slot is executed in the main GUI thread and is safe for GUI updates."""
-        print("Playback finished handler in main thread.")
-        self.timer.stop()
-        self.word_index = 0
-        self.current_frame = 0
-        self.word_label.setText('')
-        if self.stream:
-            self.stream.close()
-            self.stream = None
-        if self._on_stop:
-            self._on_stop()
-        from PyQt5.QtWidgets import QApplication
-        QApplication.instance().quit()
+        self.playback_finished.emit()
 
     def play(self):
         print("Play pressed")
@@ -263,7 +200,6 @@ class SoundDeviceAudioPlayer(AudioPlayerInterface, QWidget):
         self.timer.stop()
         self.current_frame = 0
         self.word_index = 0
-        self.word_label.setText('')
         if self._on_stop:
             self._on_stop()
 
@@ -305,10 +241,47 @@ class SoundDeviceAudioPlayer(AudioPlayerInterface, QWidget):
         word = self.words[self.word_index]
         
         if adjusted_ms >= word['start_ms']:
-            self.word_label.setText(word['word'])
-            if self._on_word_boundary:
-                self._on_word_boundary(word)
+            self.word_boundary.emit(word)
             self.word_index += 1
+
+
+class PerceivedSpeechWidget(QWidget):
+    """
+    GUI widget for perceived speech task. Provides Play, Pause, Resume, Stop buttons and displays the current word.
+    Interacts with a SoundDeviceAudioPlayer via signals/slots.
+    """
+    def __init__(self, player: SoundDeviceAudioPlayer):
+        super().__init__()
+        self.player = player
+
+        self.play_button = QPushButton('Play')
+        self.pause_button = QPushButton('Pause')
+        self.resume_button = QPushButton('Resume')
+        self.stop_button = QPushButton('Stop')
+        self.word_label = QLabel('')
+
+        layout = QHBoxLayout()
+        layout.addWidget(self.play_button)
+        layout.addWidget(self.pause_button)
+        layout.addWidget(self.resume_button)
+        layout.addWidget(self.stop_button)
+        layout.addWidget(self.word_label)
+        self.setLayout(layout)
+
+        self.play_button.clicked.connect(self.player.play)
+        self.pause_button.clicked.connect(self.player.pause)
+        self.resume_button.clicked.connect(self.player.resume)
+        self.stop_button.clicked.connect(self.player.stop)
+
+        self.player.word_boundary.connect(self.on_word_boundary)
+
+    def on_word_boundary(self, word: dict):
+        self.word_label.setText(word['word'])
+
+    def closeEvent(self, event):
+        # Ensure the audio stream is stopped when the window is closed.
+        self.player.stop()
+        event.accept()
 
 
 class PerceivedSpeechTaskExecutor(TaskExecutor):
@@ -326,7 +299,7 @@ class PerceivedSpeechTaskExecutor(TaskExecutor):
         self.event_queue = queue.Queue()
         self._stopped = False
         self.player = None
-        self.poll_timer = None
+        self.widget = None
         self.app = None
 
     def log_event(self, event: Event):
@@ -334,7 +307,7 @@ class PerceivedSpeechTaskExecutor(TaskExecutor):
             self.log_file.write(json.dumps(event.to_dict()) + "\n")
             self.log_file.flush()
 
-    def on_word(self, word: Dict[str, Any]):
+    def on_word(self, word: dict):
         event = PerceivedWordEvent(
             word=word['word'],
             start_ms=word['start_ms'],
@@ -374,7 +347,6 @@ class PerceivedSpeechTaskExecutor(TaskExecutor):
         """
         import sys
         from PyQt5.QtWidgets import QApplication
-        from PyQt5.QtCore import QTimer
         from datetime import datetime
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -383,31 +355,44 @@ class PerceivedSpeechTaskExecutor(TaskExecutor):
         self.log_file = open(log_path, 'w')
 
         self.app = QApplication(sys.argv)
-        # Adjust timing_offset_ms to fine-tune the synchronization between the
-        # displayed word and the played audio. A value between 50-150ms is typical.
         self.player = SoundDeviceAudioPlayer(self.audio_path, self.transcript_path, timing_offset_ms=100)
-        self.player.set_on_word_boundary(self.on_word)
-        self.player.set_on_pause(self.on_pause)
-        self.player.set_on_resume(self.on_resume)
-        self.player.set_on_stop(self.on_stop)
-        self.player.show()
+        self.widget = PerceivedSpeechWidget(self.player)
+        self.widget.show()
 
-        def poll_event_stream():
-            try:
-                event = self.event_queue.get_nowait()
-                if event is None:
-                    if self.poll_timer is not None:
-                        self.poll_timer.stop()
-                    return
-                self.log_event(event)
-            except queue.Empty:
-                pass
+        # Connect player signals to event queue
+        self.player.word_boundary.connect(self.on_word)
+        self.player.playback_finished.connect(self._on_playback_finished)
 
+        # Connect GUI close to stop
+        self.widget.destroyed.connect(self.player.stop)
+
+        # Connect player stop to event queue
+        # (if you want to log stop events, you can connect here)
+
+        # Use a QTimer to periodically check the event queue and log events
+        from PyQt5.QtCore import QTimer
+        def poll_event_queue():
+            while True:
+                try:
+                    event = self.event_queue.get_nowait()
+                    if event is None:
+                        if self.app is not None:
+                            self.app.quit()
+                        return
+                    self.log_event(event)
+                except queue.Empty:
+                    break
         self.poll_timer = QTimer()
-        self.poll_timer.timeout.connect(poll_event_stream)
-        self.poll_timer.start(50)  # Poll every 50ms
+        self.poll_timer.timeout.connect(poll_event_queue)
+        self.poll_timer.start(50)
 
         self.app.exec_()
+
+    def _on_playback_finished(self):
+        # Called when playback is finished
+        if self.widget is not None:
+            self.widget.close()
+        # The widget's closeEvent will stop the player and trigger app.quit via event queue
 
 # --- Main block ---
 if __name__ == "__main__":
