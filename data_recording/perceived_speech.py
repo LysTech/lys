@@ -2,9 +2,9 @@ import whisper
 import json
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Iterator
-from utils.paths import check_file_exists
-from interfaces.event import Event, PauseEvent, ResumeEvent
-from interfaces.task_executor import TaskExecutor
+from lys.utils.paths import check_file_exists
+from lys.interfaces.event import Event, PauseEvent, ResumeEvent
+from lys.interfaces.task_executor import TaskExecutor
 import time
 from PyQt5.QtWidgets import QWidget, QPushButton, QHBoxLayout, QApplication
 from PyQt5.QtCore import QTimer, pyqtSignal
@@ -14,6 +14,8 @@ import sounddevice as sd
 import soundfile as sf
 from PyQt5.QtWidgets import QLabel
 import numpy as np
+
+#TODO: it's bad that i don't currently do executor.run() in the main block
 
 
 class PerceivedWordEvent(Event):
@@ -66,19 +68,16 @@ class SoundDeviceAudioPlayer(AudioPlayerInterface, QWidget):
     """
     playbackFinished = pyqtSignal()
 
-    def __init__(self, audio_path: Path, transcript_path: Path):
+    def __init__(self, audio_path: Path, transcript_path: Path, timing_offset_ms: int = 75):
         super().__init__()
         QWidget.__init__(self)
 
         self.audio_path = audio_path
         self.transcript_path = transcript_path
+        self.timing_offset_ms = timing_offset_ms
 
         # Load audio data using soundfile
-        try:
-            self.audio_data, self.samplerate = sf.read(str(audio_path), dtype='float32')
-        except Exception as e:
-            print(f"Error loading audio file: {e}")
-            self.audio_data, self.samplerate = np.array([]), 44100
+        self.audio_data, self.samplerate = sf.read(str(audio_path), dtype='float32')
 
         self.stream: Optional[sd.OutputStream] = None
         self.current_frame = 0
@@ -129,6 +128,8 @@ class SoundDeviceAudioPlayer(AudioPlayerInterface, QWidget):
         Parse a transcript file in the format:
         [hh:mm:ss.sss --> hh:mm:ss.sss]   word
         Returns a list of dicts with keys: word, start_ms, end_ms, confidence.
+        Raises FileNotFoundError if transcript is not found.
+        Raises ValueError if a line is malformed.
         """
         import re
         def timestamp_to_ms(ts: str) -> int:
@@ -140,22 +141,26 @@ class SoundDeviceAudioPlayer(AudioPlayerInterface, QWidget):
             return int(float(h) * 3600000 + float(m_) * 60000 + float(s) * 1000)
         
         words = []
-        line_re = re.compile(r"\[(\d{2}:\d{2}:\d{2}\.\d{3}) --> (\d{2}:\d{2}:\d{2}\.\d{3})\]\s+(.*)")
-        try:
-            with open(transcript_path, 'r') as f:
-                for line in f:
-                    match = line_re.match(line.strip())
-                    if match:
-                        start, end, word = match.groups()
-                        if word.strip(): # Only add if word is not empty
-                            words.append({
-                                'word': word.strip(),
-                                'start_ms': timestamp_to_ms(start),
-                                'end_ms': timestamp_to_ms(end),
-                                'confidence': 1.0
-                            })
-        except FileNotFoundError:
-            print(f"Transcript file not found: {transcript_path}")
+        # Allow for zero or more spaces after the timestamp, and handle cases with no word.
+        line_re = re.compile(r"\[(\d{2}:\d{2}:\d{2}\.\d{3}) --> (\d{2}:\d{2}:\d{2}\.\d{3})\]\s*(.*)")
+        with open(transcript_path, 'r') as f:
+            for i, line in enumerate(f):
+                line_stripped = line.strip()
+                if not line_stripped: # Ignore empty lines
+                    continue
+
+                match = line_re.match(line_stripped)
+                if match:
+                    start, end, word = match.groups()
+                    # Always add the event, even if the word is an empty string.
+                    words.append({
+                        'word': word.strip(),
+                        'start_ms': timestamp_to_ms(start),
+                        'end_ms': timestamp_to_ms(end),
+                        'confidence': 1.0
+                    })
+                else:
+                    raise ValueError(f"Malformed transcript line {i+1}: {line_stripped}")
         return words
 
     def audio_callback(self, outdata: np.ndarray, frames: int, time, status: sd.CallbackFlags):
@@ -204,6 +209,8 @@ class SoundDeviceAudioPlayer(AudioPlayerInterface, QWidget):
             self.stream = None
         if self._on_stop:
             self._on_stop()
+        from PyQt5.QtWidgets import QApplication
+        QApplication.instance().quit()
 
     def play(self):
         print("Play pressed")
@@ -291,9 +298,13 @@ class SoundDeviceAudioPlayer(AudioPlayerInterface, QWidget):
         # Reliable timing based on frames played
         current_ms = (self.current_frame / self.samplerate) * 1000
         
+        # Apply a manual offset to compensate for audio buffer latency, aligning the
+        # displayed word more closely with the audible sound.
+        adjusted_ms = current_ms - self.timing_offset_ms
+
         word = self.words[self.word_index]
         
-        if current_ms >= word['start_ms']:
+        if adjusted_ms >= word['start_ms']:
             self.word_label.setText(word['word'])
             if self._on_word_boundary:
                 self._on_word_boundary(word)
@@ -305,21 +316,18 @@ class PerceivedSpeechTaskExecutor(TaskExecutor):
     TaskExecutor for perceived speech tasks. Streams PerceivedWordEvent, PauseEvent, ResumeEvent, etc. in real time.
     Integrates with an AudioPlayerInterface GUI for real-time control and logging.
     Uses a thread-safe queue to yield events as they occur.
+    Log file is now always saved in the session_path directory as 'perceived_speech_log.jsonl'.
     """
-    def __init__(self, transcript_path: Path, audio_path: Path, gui: Optional[AudioPlayerInterface] = None, log_path: Optional[Path] = None):
+    def __init__(self, transcript_path: Path, audio_path: Path):
         super().__init__()
         self.transcript_path = transcript_path
         self.audio_path = audio_path
-        self.gui = gui
-        self.log_file = open(log_path, 'w') if log_path else None
+        self.log_file = None
         self.event_queue = queue.Queue()
         self._stopped = False
-
-        if self.gui:
-            self.gui.set_on_word_boundary(self.on_word)
-            self.gui.set_on_pause(self.on_pause)
-            self.gui.set_on_resume(self.on_resume)
-            self.gui.set_on_stop(self.on_stop)
+        self.player = None
+        self.poll_timer = None
+        self.app = None
 
     def log_event(self, event: Event):
         if self.log_file:
@@ -331,7 +339,7 @@ class PerceivedSpeechTaskExecutor(TaskExecutor):
             word=word['word'],
             start_ms=word['start_ms'],
             end_ms=word['end_ms'],
-            confidence=word.get('confidence', 1.0)
+            confidence=word['confidence']
         )
         self.event_queue.put(event)
 
@@ -343,49 +351,69 @@ class PerceivedSpeechTaskExecutor(TaskExecutor):
 
     def on_stop(self):
         self._stopped = True
-        # Ensure the event stream loop terminates
-        self.event_queue.put(None) 
+        self.event_queue.put(None) # None is a stop signal
 
     def event_stream(self, session_path: Path) -> Iterator[Event]:
         """
         Yield events from the queue as they arrive. Ends when a stop event is received.
         """
-        while not self._stopped:
+        while True:
             try:
-                event = self.event_queue.get(timeout=0.1)
-                if event is None: # Stop signal
+                event = self.event_queue.get_nowait()
+                if event is None:  # Stop signal
                     break
                 yield event
             except queue.Empty:
-                continue
+                if self._stopped:
+                    break
+                time.sleep(0.01)
+
+    def _start(self, session_path: Path):
+        """
+        Start the perceived speech task executor. The log file is created in the session_path directory as 'perceived_speech_log_{timestamp}.jsonl', where timestamp is in YYYYMMDD_HHMMSS format.
+        """
+        import sys
+        from PyQt5.QtWidgets import QApplication
+        from PyQt5.QtCore import QTimer
+        from datetime import datetime
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_path = session_path / f"perceived_speech_log_{timestamp}.jsonl"
+        session_path.mkdir(parents=True, exist_ok=True)
+        self.log_file = open(log_path, 'w')
+
+        self.app = QApplication(sys.argv)
+        # Adjust timing_offset_ms to fine-tune the synchronization between the
+        # displayed word and the played audio. A value between 50-150ms is typical.
+        self.player = SoundDeviceAudioPlayer(self.audio_path, self.transcript_path, timing_offset_ms=100)
+        self.player.set_on_word_boundary(self.on_word)
+        self.player.set_on_pause(self.on_pause)
+        self.player.set_on_resume(self.on_resume)
+        self.player.set_on_stop(self.on_stop)
+        self.player.show()
+
+        def poll_event_stream():
+            try:
+                event = self.event_queue.get_nowait()
+                if event is None:
+                    if self.poll_timer is not None:
+                        self.poll_timer.stop()
+                    return
+                self.log_event(event)
+            except queue.Empty:
+                pass
+
+        self.poll_timer = QTimer()
+        self.poll_timer.timeout.connect(poll_event_stream)
+        self.poll_timer.start(50)  # Poll every 50ms
+
+        self.app.exec_()
 
 # --- Main block ---
 if __name__ == "__main__":
     audio_path = Path("churchill_chapter1_16k_mono.wav")
     transcript_path = Path("transcription.txt")
-    log_path = Path("test_log.jsonl")
-    
-    app = QApplication(sys.argv)
-    player = SoundDeviceAudioPlayer(audio_path, transcript_path)
-    player.show()
-    
-    executor = PerceivedSpeechTaskExecutor(transcript_path, audio_path, gui=player, log_path=log_path)
-    
-    def poll_event_stream():
-        try:
-            # Non-blocking get to avoid freezing the GUI
-            event = executor.event_queue.get_nowait()
-            if event is None:
-                # Proper shutdown
-                QApplication.instance().quit()
-                return
-            executor.log_event(event)
-        except queue.Empty:
-            pass
-
-    # Timer to poll the event queue from the main GUI thread
-    poll_timer = QTimer()
-    poll_timer.timeout.connect(poll_event_stream)
-    poll_timer.start(50) # Poll every 50ms
-
-    sys.exit(app.exec_())
+    # session_path is unused in this executor, but required by interface
+    session_path = Path(".")
+    executor = PerceivedSpeechTaskExecutor(transcript_path, audio_path)
+    executor.start(session_path)

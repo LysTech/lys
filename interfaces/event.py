@@ -29,3 +29,8 @@ class ResumeEvent(Event):
     """Event representing a resume in the session."""
     def _to_dict(self) -> dict:
         return {"event_type": "resume"} 
+
+class StartEvent(Event):
+    """Event representing the start of a session or task."""
+    def _to_dict(self) -> dict:
+        return {"event_type": "start"} 

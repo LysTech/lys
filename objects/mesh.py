@@ -6,7 +6,7 @@ import vtk
 from vtk.util import numpy_support
 from typing import List
 
-from lys.utils.paths import lys_data_dir
+from lys.utils.paths import get_subjects_dir
 from lys.objects.segmentation import load_charm_segmentation
 from lys.objects.atlas import Atlas
 from lys.utils.coordinates import align_with_csf, undo_the_scaling, undo_affine_transformation, read_adjBBX_file
@@ -310,7 +310,7 @@ def mni_to_nativespace(mesh: Mesh, segmentation: Atlas, patient: str):
 
 
 def mni_mesh_path(patient: str) -> str:
-    root = lys_data_dir()
+    root = get_subjects_dir()
     return os.path.join(root, patient, "anat", "meshes", f"{patient}_EIGMOD_MPR_IIHC_MNI_WM_LH_edited_again_RECOSM_D32k")
 
 

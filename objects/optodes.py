@@ -82,7 +82,6 @@ class Points(Plottable):
             # Update the mapper with new geometry
             mapper = actor.GetMapper()
             mapper.SetInputConnection(sphere.GetOutputPort())
-
 class Optodes(Plottable):
     def __init__(self, source_coords: List[Tuple[float, float, float]], 
                  detector_coords: List[Tuple[float, float, float]],
@@ -124,3 +123,4 @@ class Optodes(Plottable):
         if 'radius' in updates:
             self.sources.apply_style(actor, radius=updates['radius'])
             self.detectors.apply_style(actor, radius=updates['radius'])
+

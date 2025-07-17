@@ -29,9 +29,7 @@ for path in paths:
 
 #TODO: BettinaSessionAdapter is a terrible name?
 #TODO: currently we don't do optodes stuff for BettinaSessionAdapter
-#TODO: implement the Flow2SessionAdapter
 #TODO: generally figure out the optodes thing, see comment in Notion Architecture page
-#TODO: RawSessionPreProcessor is a PREprocessor so it should be renamed
 
 class RawSessionPreProcessor:
     def __init__(self, session_path: Path):
@@ -99,7 +97,7 @@ class Flow2MomentsSessionAdapter(ISessionAdapter):
     def extract_data(self, session_path: Path) -> dict:
         """
         Extracts data from a .snirf file and returns a dictionary with:
-        - 'data': np.ndarray of shape (n_timepoints, n_channels, n_wavelengths, 3)
+        - 'data': np.ndarray of shape (n_timepoints, n_channels, n_wavelengths, 3) -- 3 is the 3 moments
         - 'channels': list of (source, detector) tuples
         - 'wavelengths': list of wavelength indices
         - 'moment_names': ['amplitude', 'mean_time_of_flight', 'variance']
@@ -107,11 +105,35 @@ class Flow2MomentsSessionAdapter(ISessionAdapter):
         """
         snirf_path = next(session_path.glob('*_MOMENTS.snirf'))
         snirf_data = snirf.Snirf(str(snirf_path), 'r')
-        nirs_data_block = snirf_data.nirs[0].data[0]
-        mlist = nirs_data_block.measurementList
-        n_timepoints = nirs_data_block.dataTimeSeries.shape[0]
 
-        # Extract absolute start time from metaDataTags
+        assert len(snirf_data.nirs) == 1, "This adapter only supports SNIRF files with a single nirs block."
+        assert len(snirf_data.nirs[0].data) == 1, "This adapter only supports SNIRF files with a single data block."
+        
+        nirs_data_block = snirf_data.nirs[0].data[0]
+        
+        start_timestamp = self._get_nirs_start_timestamp(snirf_data)
+        absolute_time_vector = self._calculate_absolute_time_vector(nirs_data_block, start_timestamp)
+
+        channel_wavelength_maps = self._build_channel_wavelength_maps(nirs_data_block.measurementList)
+        moment_map, moment_names = self._get_moment_info()
+
+        data = self._populate_data_array(nirs_data_block, channel_wavelength_maps, moment_map)
+        
+        # Align data with the protocol start time
+        data, absolute_time_vector = self._align_with_protocol(
+            data, absolute_time_vector, session_path
+        )
+
+        return {
+            'data': data,
+            'channels': channel_wavelength_maps['channel_tuples'],
+            'wavelengths': channel_wavelength_maps['wavelength_indices'],
+            'moment_names': moment_names,
+            'time': absolute_time_vector,
+        }
+
+    def _get_nirs_start_timestamp(self, snirf_data: snirf.Snirf) -> float:
+        """Extract absolute start time from metaDataTags and return as a UTC timestamp."""
         meta = snirf_data.nirs[0].metaDataTags
         assert hasattr(meta, 'MeasurementDate'), "metaDataTags must have 'MeasurementDate'"
         assert hasattr(meta, 'MeasurementTime'), "metaDataTags must have 'MeasurementTime'"
@@ -125,59 +147,69 @@ class Flow2MomentsSessionAdapter(ISessionAdapter):
         # check if timezone-aware, if not, assume UTC
         if start_datetime.tzinfo is None:
             start_datetime = start_datetime.replace(tzinfo=timezone.utc)
-        start_timestamp = start_datetime.timestamp()
+        return start_datetime.timestamp()
 
-        # Create absolute time vector
+    def _calculate_absolute_time_vector(self, nirs_data_block, start_timestamp: float) -> np.ndarray:
+        """Create absolute time vector from relative time vector and start timestamp."""
         relative_time_vector = nirs_data_block.time
-        absolute_time_vector = relative_time_vector + start_timestamp
+        return relative_time_vector + start_timestamp
 
+    def _build_channel_wavelength_maps(self, mlist) -> dict:
+        """
+        Builds lookup tables required to map the sparse SNIRF measurement list
+        to a dense, structured numpy array.
 
-        # 1. Build unique channel and wavelength lists
+        This function defines the 'channel' and 'wavelength' axes of the output array.
+        It scans all measurements to find unique source-detector pairs (channels) and
+        wavelengths, then creates sorted lists to define the order of those axes.
+        It also creates reverse-lookup dictionaries to map a channel or wavelength
+        to its integer index in the final array.
+        """
         channel_tuples = sorted(set((m.sourceIndex, m.detectorIndex) for m in mlist))
         wavelength_indices = sorted(set(getattr(m, 'wavelengthIndex', 1) for m in mlist))
-        channel_index = {ch: i for i, ch in enumerate(channel_tuples)}
-        wavelength_index = {w: i for i, w in enumerate(wavelength_indices)}
+        
+        return {
+            "channel_tuples": channel_tuples,
+            "wavelength_indices": wavelength_indices,
+            "channel_index": {ch: i for i, ch in enumerate(channel_tuples)},
+            "wavelength_index": {w: i for i, w in enumerate(wavelength_indices)},
+        }
 
-        # 2. Map dataTypeIndex/dataUnit to moment index
+    @staticmethod
+    def _get_moment_info() -> tuple[dict, list[str]]:
+        """Return the mapping from dataType/Unit to moment index, and a list of moment names."""
         moment_map = {
             (2, ''): 0,        # amplitude
             (1, 'ps'): 1,      # mean time of flight
             (3, 'ps^2'): 2     # variance
         }
         moment_names = ['amplitude', 'mean_time_of_flight', 'variance']
+        return moment_map, moment_names
+        
+    def _populate_data_array(self, nirs_data_block, channel_wavelength_maps: dict, moment_map: dict) -> np.ndarray:
+        """Allocate and fill the main data array from the SNIRF data block."""
+        mlist = nirs_data_block.measurementList
+        n_timepoints = nirs_data_block.dataTimeSeries.shape[0]
 
-        n_channels = len(channel_tuples)
-        n_wavelengths = len(wavelength_indices)
+        n_channels = len(channel_wavelength_maps['channel_tuples'])
+        n_wavelengths = len(channel_wavelength_maps['wavelength_indices'])
         n_moments = 3
-
-        # 3. Allocate output array
+        
         data = np.full((n_timepoints, n_channels, n_wavelengths, n_moments), np.nan)
 
-        # 4. Fill array
         for col, m in enumerate(mlist):
             ch = (m.sourceIndex, m.detectorIndex)
             w = getattr(m, 'wavelengthIndex', 1)
             dtype_idx = getattr(m, 'dataTypeIndex', None)
             dunit = getattr(m, 'dataUnit', '')
+            
             if isinstance(dtype_idx, int):
                 moment_idx = moment_map.get((dtype_idx, dunit))
                 if moment_idx is not None:
-                    cidx = channel_index[ch]
-                    widx = wavelength_index[w]
+                    cidx = channel_wavelength_maps['channel_index'][ch]
+                    widx = channel_wavelength_maps['wavelength_index'][w]
                     data[:, cidx, widx, moment_idx] = nirs_data_block.dataTimeSeries[:, col]
-
-        # Align data with the protocol start time
-        data, absolute_time_vector = self._align_with_protocol(
-            data, absolute_time_vector, session_path
-        )
-
-        return {
-            'data': data,
-            'channels': channel_tuples,
-            'wavelengths': wavelength_indices,
-            'moment_names': moment_names,
-            'time': absolute_time_vector,
-        }
+        return data
 
     def _align_with_protocol(self, data: np.ndarray, time_vector: np.ndarray, session_path: Path) -> tuple[np.ndarray, np.ndarray]:
         """Aligns NIRS data with the protocol start time by trimming the beginning."""
@@ -244,7 +276,7 @@ class Flow2MomentsSessionAdapter(ISessionAdapter):
 
 if __name__=="__main__":
     import os
-    from lys.utils import lys_data_dir
-    session_path = Path(os.path.join(lys_data_dir(), "thomas/flow2/perceived_speech/session-01"))
+    from lys.utils.paths import get_subjects_dir
+    session_path = Path(os.path.join(get_subjects_dir(), "thomas/flow2/perceived_speech/session-01"))
     processor = Flow2MomentsSessionAdapter()
     data = processor.extract_data(session_path)
