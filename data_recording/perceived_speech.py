@@ -188,42 +188,42 @@ class SoundDeviceAudioPlayer(QObject):
     @staticmethod
     def _parse_transcript(transcript_path: Path) -> List[Dict[str, Any]]:
         """
-        Parse a transcript file in the format:
-        [hh:mm:ss.sss --> hh:mm:ss.sss]   word
+        Parse a transcript file in the new JSON format:
+        {
+            ...,
+            "transcription": [
+                {
+                    "timestamps": {"from": ..., "to": ...},
+                    "offsets": {"from": int, "to": int},
+                    "text": str
+                },
+                ...
+            ]
+        }
         Returns a list of dicts with keys: word, start_ms, end_ms, confidence.
         Raises FileNotFoundError if transcript is not found.
-        Raises ValueError if a line is malformed.
+        Raises ValueError if the JSON is malformed or missing required fields.
         """
-        import re
-        def timestamp_to_ms(ts: str) -> int:
-            """Convert a timestamp string hh:mm:ss.sss to milliseconds."""
-            m = re.match(r"(\d+):(\d+):(\d+\.\d+)", ts)
-            if not m:
-                raise ValueError(f"Invalid timestamp format: {ts}")
-            h, m_, s = m.groups()
-            return int(float(h) * 3600000 + float(m_) * 60000 + float(s) * 1000)
-        
-        words = []
-        # Allow for zero or more spaces after the timestamp, and handle cases with no word.
-        line_re = re.compile(r"\[(\d{2}:\d{2}:\d{2}\.\d{3}) --> (\d{2}:\d{2}:\d{2}\.\d{3})\]\s*(.*)")
+        import json
         with open(transcript_path, 'r') as f:
-            for i, line in enumerate(f):
-                line_stripped = line.strip()
-                if not line_stripped: # Ignore empty lines
-                    continue
-
-                match = line_re.match(line_stripped)
-                if match:
-                    start, end, word = match.groups()
-                    # Always add the event, even if the word is an empty string.
-                    words.append({
-                        'word': word.strip(),
-                        'start_ms': timestamp_to_ms(start),
-                        'end_ms': timestamp_to_ms(end),
-                        'confidence': 1.0
-                    })
-                else:
-                    raise ValueError(f"Malformed transcript line {i+1}: {line_stripped}")
+            data = json.load(f)
+        if 'transcription' not in data:
+            raise ValueError("Transcript JSON missing 'transcription' key")
+        words = []
+        for i, entry in enumerate(data['transcription']):
+            try:
+                word = entry.get('text', '').strip()
+                offsets = entry['offsets']
+                start_ms = int(offsets['from'])
+                end_ms = int(offsets['to'])
+                words.append({
+                    'word': word,
+                    'start_ms': start_ms,
+                    'end_ms': end_ms,
+                    'confidence': 1.0
+                })
+            except Exception as e:
+                raise ValueError(f"Malformed transcription entry at index {i}: {entry} ({e})")
         return words
 
     def audio_callback(self, outdata: np.ndarray, frames: int, time, status: sd.CallbackFlags):

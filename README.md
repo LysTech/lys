@@ -389,3 +389,25 @@ ffmpeg -activation_bytes 7935c812 -i "./audiobooks/Churchill_Walking_with_Destin
 ```
 
 Then this book needs to be transcribed so that each word is timestamped. We do this with [whisper.cpp](https://github.com/ggml-org/whisper.cpp) for performance. [#TODO: provide a script of how to do this].
+
+To generate a transcript, clone and make the `whisper.cpp` repo, download a model (`large-v3-turbo` is good, smaller models seem quite bad) like this:
+
+```bash
+bash ./models/download-ggml-model.sh large-v3-turbo
+```
+
+ and run this command: 
+
+```bash
+./build/bin/whisper-cli -m /Users/thomasrialan/Documents/code/whisper.cpp/models/ggml-large-v3-turbo.bin -f /Users/thomasrialan/Documents/code/Geometric-eigenmodes/data/assets/audio/churchill/churchill_chunk_1_16k_mono.wav -oj -ml 1 -t 6 > /Users/thomasrialan/Documents/code/Geometric-eigenmodes/data/assets/audio/churchill/transcription.json
+```
+
+`-t 6` means use 6 threads, `-ml 1` is max-length argument, meaning we want timestamps for each word, `-oj` means we want `.json` output.
+
+To convert `.mp3` to 16k mono `.wav`:
+
+```bash
+ffmpeg -i file.mp3 -ar 16000 -ac 1 file_16k_mono.wav
+```
+
+(I'm not certain this is necessary).
