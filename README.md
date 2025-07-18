@@ -399,10 +399,12 @@ bash ./models/download-ggml-model.sh large-v3-turbo
  and run this command: 
 
 ```bash
-./build/bin/whisper-cli -m /Users/thomasrialan/Documents/code/whisper.cpp/models/ggml-large-v3-turbo.bin -f /Users/thomasrialan/Documents/code/Geometric-eigenmodes/data/assets/audio/churchill/churchill_chunk_1_16k_mono.wav -oj -ml 1 -t 6 > /Users/thomasrialan/Documents/code/Geometric-eigenmodes/data/assets/audio/churchill/transcription.json
+MODEL_PATH="/Users/thomasrialan/Documents/code/whisper.cpp/models/ggml-large-v3-turbo.bin"
+WHISPER_BIN="/Users/thomasrialan/Documents/code/whisper.cpp/build/bin/whisper-cli"
+"$WHISPER_BIN" -m "$MODEL_PATH" -f <file path here!> -oj -ml 1
 ```
 
-`-t 6` means use 6 threads, `-ml 1` is max-length argument, meaning we want timestamps for each word, `-oj` means we want `.json` output.
+`-ml 1` is max-length argument, meaning we want timestamps for each word, `-oj` means we want `.json` output.
 
 To convert `.mp3` to 16k mono `.wav`:
 

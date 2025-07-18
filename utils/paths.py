@@ -108,3 +108,13 @@ def get_next_session_number(root: Path) -> int:
     else:
         return 1
 
+
+def get_audio_assets_path() -> Path:
+    """
+    Returns the Path to the audio assets directory within the data directory. Raises FileNotFoundError if it does not exist.
+    """
+    path = lys_data_dir() / "assets" / "audio"
+    if not path.exists():
+        raise FileNotFoundError(f"Audio assets directory does not exist: {path}")
+    return path
+

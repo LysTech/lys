@@ -1,19 +1,29 @@
 import whisper
 import json
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Iterator
-from lys.utils.paths import check_file_exists
+from typing import List, Dict, Any, Optional, Iterator, Tuple
+from lys.utils.paths import check_file_exists, get_audio_assets_path
 from lys.interfaces.event import Event, PauseEvent, ResumeEvent
 from lys.interfaces.task_executor import TaskExecutor
 import time
-from PyQt5.QtWidgets import QWidget, QPushButton, QHBoxLayout, QApplication
+from PyQt5.QtWidgets import QWidget, QPushButton, QHBoxLayout, QApplication, QFileDialog, QLabel, QVBoxLayout
 from PyQt5.QtCore import QTimer, pyqtSignal, QObject
 import sys
 import queue
 import sounddevice as sd
 import soundfile as sf
-from PyQt5.QtWidgets import QLabel
 import numpy as np
+
+
+def validate_audio_transcript_folder(folder: Path) -> Optional[Tuple[Path, Path]]:
+    """
+    Given a folder, returns (audio_path, transcript_path) if exactly one .wav and one .json file exist, else None.
+    """
+    wavs = list(folder.glob('*.wav'))
+    jsons = list(folder.glob('*.json'))
+    if len(wavs) == 1 and len(jsons) == 1:
+        return wavs[0], jsons[0]
+    return None
 
 
 class PerceivedWordEvent(Event):
@@ -37,20 +47,24 @@ class PerceivedWordEvent(Event):
 class PerceivedSpeechTaskExecutor(TaskExecutor):
     """
     TaskExecutor for perceived speech tasks. Streams PerceivedWordEvent, PauseEvent, ResumeEvent, etc. in real time.
-    Integrates with an AudioPlayerInterface GUI for real-time control and logging.
-    Uses a thread-safe queue to yield events as they occur.
-    Log file is now always saved in the session_path directory as 'perceived_speech_log.jsonl'.
+    Now expects audio and transcript paths to be provided at playback time, not at construction.
     """
-    def __init__(self, transcript_path: Path, audio_path: Path):
+    def __init__(self):
         super().__init__()
-        self.transcript_path = transcript_path
-        self.audio_path = audio_path
         self.log_file = None
         self.event_queue = queue.Queue()
         self._stopped = False
         self.player = None
         self.widget = None
         self.app = None
+        self.audio_path = None
+        self.transcript_path = None
+
+    def _start(self, session_path: Path):
+        """
+        This method is required by TaskExecutor but is not used. Use start() instead.
+        """
+        raise NotImplementedError("Use start() instead of _start() for PerceivedSpeechTaskExecutor.")
 
     def log_event(self, event: Event):
         if self.log_file:
@@ -91,36 +105,36 @@ class PerceivedSpeechTaskExecutor(TaskExecutor):
                     break
                 time.sleep(0.01)
 
-    def _start(self, session_path: Path):
+    def start(self, session_path: Path):
         """
-        Start the perceived speech task executor. The log file is created in the session_path directory as 'perceived_speech_log_{timestamp}.jsonl', where timestamp is in YYYYMMDD_HHMMSS format.
+        Launches the GUI for folder selection and playback. The user selects a folder containing audio and transcript.
         """
         import sys
         from PyQt5.QtWidgets import QApplication
-        from datetime import datetime
+        self.app = QApplication(sys.argv)
+        self.widget = PerceivedSpeechWidget(self)
+        self.widget.show()
+        self.session_path = session_path
+        self.app.exec_()
 
+    def start_with_files(self, audio_path: Path, transcript_path: Path, session_path: Path):
+        """
+        Start playback and logging with the given audio and transcript files.
+        """
+        from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_path = session_path / f"perceived_speech_log_{timestamp}.jsonl"
         session_path.mkdir(parents=True, exist_ok=True)
         self.log_file = open(log_path, 'w')
-
-        self.app = QApplication(sys.argv)
-        self.player = SoundDeviceAudioPlayer(self.audio_path, self.transcript_path, timing_offset_ms=100)
-        self.widget = PerceivedSpeechWidget(self.player)
-        self.widget.show()
-
+        self.audio_path = audio_path
+        self.transcript_path = transcript_path
+        self.player = SoundDeviceAudioPlayer(audio_path, transcript_path, timing_offset_ms=100)
+        if self.widget is not None:
+            self.widget.set_player(self.player)
         # Connect player signals to event queue
         self.player.word_boundary.connect(self.on_word)
         self.player.playback_finished.connect(self._on_playback_finished)
-
-        # Connect GUI close to stop
-        self.widget.destroyed.connect(self.player.stop)
-
-        # Connect player stop to event queue
-        # (if you want to log stop events, you can connect here)
-
         # Use a QTimer to periodically check the event queue and log events
-        from PyQt5.QtCore import QTimer
         def poll_event_queue():
             while True:
                 try:
@@ -135,8 +149,6 @@ class PerceivedSpeechTaskExecutor(TaskExecutor):
         self.poll_timer = QTimer()
         self.poll_timer.timeout.connect(poll_event_queue)
         self.poll_timer.start(50)
-
-        self.app.exec_()
 
     def _on_playback_finished(self):
         # Called when playback is finished
@@ -358,46 +370,108 @@ class SoundDeviceAudioPlayer(QObject):
 
 class PerceivedSpeechWidget(QWidget):
     """
-    GUI widget for perceived speech task. Provides Play, Pause, Resume, Stop buttons and displays the current word.
+    GUI widget for perceived speech task. Provides folder picker, Play, Pause, Resume, Stop buttons and displays the current word.
     Interacts with a SoundDeviceAudioPlayer via signals/slots.
     """
-    def __init__(self, player: SoundDeviceAudioPlayer):
+    def __init__(self, executor: PerceivedSpeechTaskExecutor):
         super().__init__()
-        self.player = player
+        self.executor = executor
+        self.player = None
+        self.selected_folder = None
+        self.audio_path = None
+        self.transcript_path = None
 
+        self.folder_button = QPushButton('Select Folder')
+        self.folder_label = QLabel('No folder selected')
+        self.file_label = QLabel('')
         self.play_button = QPushButton('Play')
         self.pause_button = QPushButton('Pause')
         self.resume_button = QPushButton('Resume')
         self.stop_button = QPushButton('Stop')
         self.word_label = QLabel('')
 
-        layout = QHBoxLayout()
-        layout.addWidget(self.play_button)
-        layout.addWidget(self.pause_button)
-        layout.addWidget(self.resume_button)
-        layout.addWidget(self.stop_button)
-        layout.addWidget(self.word_label)
-        self.setLayout(layout)
+        self.play_button.setEnabled(False)
+        self.pause_button.setEnabled(False)
+        self.resume_button.setEnabled(False)
+        self.stop_button.setEnabled(False)
 
-        self.play_button.clicked.connect(self.player.play)
-        self.pause_button.clicked.connect(self.player.pause)
-        self.resume_button.clicked.connect(self.player.resume)
-        self.stop_button.clicked.connect(self.player.stop)
+        top_layout = QVBoxLayout()
+        folder_layout = QHBoxLayout()
+        folder_layout.addWidget(self.folder_button)
+        folder_layout.addWidget(self.folder_label)
+        top_layout.addLayout(folder_layout)
+        top_layout.addWidget(self.file_label)
 
+        controls_layout = QHBoxLayout()
+        controls_layout.addWidget(self.play_button)
+        controls_layout.addWidget(self.pause_button)
+        controls_layout.addWidget(self.resume_button)
+        controls_layout.addWidget(self.stop_button)
+        controls_layout.addWidget(self.word_label)
+        top_layout.addLayout(controls_layout)
+        self.setLayout(top_layout)
+
+        self.folder_button.clicked.connect(self.select_folder)
+        self.play_button.clicked.connect(self.play)
+        self.pause_button.clicked.connect(self.pause)
+        self.resume_button.clicked.connect(self.resume)
+        self.stop_button.clicked.connect(self.stop)
+
+    def set_player(self, player: SoundDeviceAudioPlayer):
+        self.player = player
+        self.pause_button.setEnabled(True)
+        self.resume_button.setEnabled(True)
+        self.stop_button.setEnabled(True)
         self.player.word_boundary.connect(self.on_word_boundary)
+
+    def select_folder(self):
+        assets_path = get_audio_assets_path()
+        options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
+        folder = QFileDialog.getExistingDirectory(self, 'Select Audio/Transcript Folder', str(assets_path), options=options)
+        if folder:
+            self.selected_folder = Path(folder)
+            result = validate_audio_transcript_folder(self.selected_folder)
+            if result:
+                self.audio_path, self.transcript_path = result
+                self.folder_label.setText(str(self.selected_folder))
+                self.file_label.setText(f"Audio: {self.audio_path.name}, Transcript: {self.transcript_path.name}")
+                self.play_button.setEnabled(True)
+            else:
+                self.audio_path = None
+                self.transcript_path = None
+                self.folder_label.setText('Invalid folder')
+                self.file_label.setText('Folder must contain exactly one .wav and one .json file')
+                self.play_button.setEnabled(False)
+
+    def play(self):
+        if self.audio_path and self.transcript_path:
+            self.executor.start_with_files(self.audio_path, self.transcript_path, self.executor.session_path)
+            if self.player:
+                self.player.play()
+
+    def pause(self):
+        if self.player:
+            self.player.pause()
+
+    def resume(self):
+        if self.player:
+            self.player.resume()
+
+    def stop(self):
+        if self.player:
+            self.player.stop()
 
     def on_word_boundary(self, word: dict):
         self.word_label.setText(word['word'])
 
     def closeEvent(self, event):
-        # Ensure the audio stream is stopped when the window is closed.
-        self.player.stop()
+        if self.player:
+            self.player.stop()
         event.accept()
 
 
 if __name__ == "__main__":
-    audio_path = Path("churchill_chapter1_16k_mono.wav")
-    transcript_path = Path("transcription.txt")
     session_path = Path(".")
-    executor = PerceivedSpeechTaskExecutor(transcript_path, audio_path)
+    executor = PerceivedSpeechTaskExecutor()
     executor.start(session_path)
