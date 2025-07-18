@@ -16,6 +16,7 @@ def load_charm_segmentation(patient: str) -> Optional[Atlas]:
     validate_patient_string(patient)
     path_obj = _segmentation_path(patient)
     if not path_obj.exists():
+        #TODO: is this bad code? I'm not sure.
         warnings.warn(f"Segmentation file not found for patient {patient} at {path_obj}. Returning None.")
         return None
     check_file_exists(str(path_obj))

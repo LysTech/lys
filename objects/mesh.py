@@ -36,7 +36,7 @@ def load_unMNI_mesh(patient: str) -> Optional["Mesh"]:
     """
     from lys.visualization.plot3d import VTKScene
     mesh_path = Path(mni_mesh_path(patient))
-    if not mesh_path.exists():
+    if not mesh_path.exists(): #TODO: is this bad code? I'm not sure.
         warnings.warn(f"Mesh file not found for patient {patient} at {mesh_path}. Returning None.")
         return None
     mni_mesh = from_mat(str(mesh_path))
@@ -313,7 +313,7 @@ def mni_to_nativespace(mesh: Mesh, segmentation: Atlas, patient: str):
 
 def mni_mesh_path(patient: str) -> str:
     root = get_subjects_dir()
-    return os.path.join(root, patient, "anat", "meshes", f"{patient}_EIGMOD_MPR_IIHC_MNI_WM_LH_edited_again_RECOSM_D32k")
+    return os.path.join(root, patient, "anat", "meshes", f"{patient}_EIGMOD_MPR_IIHC_MNI_WM_LH_edited_again_RECOSM_D32k.mat")
 
 
 def from_mat(mat_file_path: str, **kwargs) -> Mesh:

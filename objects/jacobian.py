@@ -228,6 +228,7 @@ def load_jacobians_from_session_dir(session_dir: Path) -> list[Union[Jacobian, N
     """
     jacobian_files = _find_jacobian_files(session_dir, suppress_error=True)
     if not jacobian_files:
+        #TODO: is this bad code? I'm not sure.
         warnings.warn(f"No Jacobian files found in {session_dir}. Returning [None].")
         return [None]
     print(f"Found {len(jacobian_files)} Jacobian file(s) in {session_dir}")

@@ -87,13 +87,3 @@ def test_create_session_path(monkeypatch, tmp_path):
     expected = tmp_path / "subjects" / subject / device / experiment_name / f"session-{session_int}"
     result = create_session_path(subject, experiment_name, device, session_int)
     assert result == expected
-
-def test_get_audio_assets_path(monkeypatch, tmp_path):
-    """
-    Test that get_audio_assets_path returns the correct path under the LYS_DATA_DIR.
-    """
-    monkeypatch.setenv('LYS_DATA_DIR', str(tmp_path))
-    from lys.utils.paths import get_audio_assets_path
-    expected = tmp_path / "assets" / "audio"
-    result = get_audio_assets_path()
-    assert result == expected

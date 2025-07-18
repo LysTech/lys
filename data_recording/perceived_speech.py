@@ -213,10 +213,11 @@ class SoundDeviceAudioPlayer(QObject):
             ]
         }
         Returns a list of dicts with keys: word, start_ms, end_ms, confidence.
-        Raises FileNotFoundError if transcript is not found.
+        Raises FileNotFoundError if transcript is not found or is empty.
         Raises ValueError if the JSON is malformed or missing required fields.
         """
-        import json
+        if not transcript_path.exists() or transcript_path.stat().st_size == 0:
+            raise FileNotFoundError(f"Transcript file not found or empty: {transcript_path}")
         with open(transcript_path, 'r') as f:
             data = json.load(f)
         if 'transcription' not in data:
@@ -224,7 +225,7 @@ class SoundDeviceAudioPlayer(QObject):
         words = []
         for i, entry in enumerate(data['transcription']):
             try:
-                word = entry.get('text', '').strip()
+                word = entry['text'].strip()
                 offsets = entry['offsets']
                 start_ms = int(offsets['from'])
                 end_ms = int(offsets['to'])
