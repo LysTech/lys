@@ -413,3 +413,15 @@ ffmpeg -i file.mp3 -ar 16000 -ac 1 file_16k_mono.wav
 ```
 
 (I'm not certain this is necessary).
+
+### Flow2
+Currently we have to manually start and stop the Flow2 recording, however pre-processing takes care of aligning timestamps. So you can run `examples/task_demo.py`.
+
+Current steps:
+1. Do the steps to get the recording started,
+2. Stop the recording
+3. Wait a few mins for uploading to Kernel Cloud [this steps needs to be removed w/offline mode]
+4. Run the Moments pipeline
+5. Put the resulting .snirf file in the session folder (also done manually, sigh)
+6. Run pre-processing
+

@@ -4,7 +4,8 @@ import numpy as np
 from scipy.io import loadmat
 import vtk
 from vtk.util import numpy_support
-from typing import List
+from typing import List, Optional
+from pathlib import Path
 
 from lys.utils.paths import get_subjects_dir
 from lys.objects.segmentation import load_charm_segmentation
@@ -25,27 +26,28 @@ Defines classes related to meshes:
 # - load_unMNI_mesh should just load the mesh from disk if it exists? NO: takes 1.65 seconds to load MNI+unMNI, its fast enough!
 
 
-def load_unMNI_mesh(patient: str):
+def load_unMNI_mesh(patient: str) -> Optional["Mesh"]:
     """ 
     patient: e.g. "P03"
     segmentation: Atlas object, required for alignment to native space
 
-    I'm not sure if this is good code. 
-    - Doing the transformation in the constructor is maybe not good?
-    - loading segmentation is bad for memory/performance because Patient.from_name loads seg twice as a result
-    
-    Possible improvements:
-    - decorate this function with a cache decorator (might be too clever / hide problems?)
-    - we save unMNI'd meshes to disk explicity (rather than in a cache) and load them
+    If the mesh file does not exist, prints a warning and returns None.
+    If the segmentation does not exist, prints a warning and returns None.
     """
     from lys.visualization.plot3d import VTKScene
-    mni_mesh = from_mat(mni_mesh_path(patient))
+    mesh_path = Path(mni_mesh_path(patient))
+    if not mesh_path.exists():
+        warnings.warn(f"Mesh file not found for patient {patient} at {mesh_path}. Returning None.")
+        return None
+    mni_mesh = from_mat(str(mesh_path))
     mni_mesh.vertices = mni_mesh.vertices[:, ::-1] #flip XYZ -> ZYX for matlab fortran order compatibility
     segmentation = load_charm_segmentation(patient)
+    if segmentation is None:
+        warnings.warn(f"Segmentation not found for patient {patient}. Returning None.")
+        return None
     nativespace_mesh = mni_to_nativespace(mni_mesh, segmentation, patient)
     eigenmodes = load_eigenmodes(patient)
     nativespace_mesh.eigenmodes = eigenmodes
-    #TODO: this plot doesn't *always* show, why not??? (i think has to do with vtk/gui event loop shit)
     VTKScene().add(segmentation).add(nativespace_mesh).format(segmentation, opacity=0.02).show() # plot for visual check
     return nativespace_mesh
 

@@ -86,7 +86,6 @@ class Flow2MomentsSessionAdapter(ISessionAdapter):
 
     This extracts a (num_timepoints, num_channels, num_wavelengths, num_moments) array.
     where num_moments is 3, and the moments are amplitude, mean_time_of_flight, and variance.
-    
     """
     #TODO: This doesn't get the EEG data out, but it should!
     def can_handle(self, session_path: Path) -> bool:
@@ -277,6 +276,8 @@ class Flow2MomentsSessionAdapter(ISessionAdapter):
 if __name__=="__main__":
     import os
     from lys.utils.paths import get_subjects_dir
-    session_path = Path(os.path.join(get_subjects_dir(), "thomas/flow2/perceived_speech/session-01"))
-    processor = Flow2MomentsSessionAdapter()
+    session_path = Path(os.path.join(get_subjects_dir(), "thomas/flow2/perceived_speech/session-2"))
+    #processor = Flow2MomentsSessionAdapter()
+    processor = RawSessionPreProcessor(session_path)
     data = processor.extract_data(session_path)
+    #ERROR: currently the nirs_start_time is wrong! sometimes? is it because they UTC and I don't?
