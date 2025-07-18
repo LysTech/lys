@@ -1,5 +1,7 @@
 # Lys
 
+Breaking change in latest merge: now the data structure shouldn't be data/P03, but data/subjects/P03.
+
 TODO:
 - most important one is to sit down with Anthony and/or Nyx and get input on this / maybe we can re-diagram things and have a second think now that lots of stuff is implemented -> there'll probably be some good refactors to do. I think the code is sufficiently modular that this shouldn't be too hard (??)
 - (lots of #TODO tags throughout the code, grep for them and fix)
@@ -372,32 +374,54 @@ The MATLAB file should contain:
 
 Each eigenmode is represented as an `Eigenmode` object, which is a subclass of `np.ndarray` with an additional `eigenvalue` attribute. This allows you to work with eigenmode values as regular numpy arrays while maintaining access to the associated eigenvalue.
 
-## Data Folder Structure
 
-Your data directory should be organized as follows:
+## Notes on recording perceived speech data
+
+We use [audible-cli](https://github.com/mkb79/audible-cli) to download audiobooks, and whisper to transcribe them with word-level timestamps. Claude estimates this to have ~20ms accuracy which is good enough for NIRS/EEG.
+
+Example download and conversion to `.mp3` of a book:
 
 ```
-subject/
-├── anat/
-│   ├── volumes/
-│   │   ├── MRI/
-│   │   └── segmentations/
-│   └── meshes/
-├── derivatives/
-│   └── jacobians/
-│       └── sub-001_jacobian.h5  # Actual file stored once
-└── nirs/
-    └── experiment/
-        ├── session1/
-        │   ├── (symlink) sub-001_jacobian.h5 -> ../../derivatives/jacobians/sub-001_jacobian.h5 
-        │   ├── sub-001_optodes.some_format
-        │   ├── data.snirf
-        │   ├── protocol.prt
-        │   └── processed_session1_v1
-        └── session2/
-            ├── (symlink) sub-001_jacobian.h5 -> ../../derivatives/jacobians/sub-001_jacobian.h5
-            ├── sub-001_optodes.some_format
-            ├── data.snirf
-            └── protocol.prt
+audible library list
+audible download --asin 0141987162 --output-dir ./audiobooks/ --aax
+audible activation-bytes #this gives some number, here "7935c812"
+ffmpeg -activation_bytes 7935c812 -i "./audiobooks/Churchill_Walking_with_Destiny-LC_64_22050_stereo.aax" -c:a libmp3lame "./audiobooks/churchill.mp3" #converts .aax file to .mp3
 ```
+
+Then this book needs to be transcribed so that each word is timestamped. We do this with [whisper.cpp](https://github.com/ggml-org/whisper.cpp) for performance. [#TODO: provide a script of how to do this].
+
+To generate a transcript, clone and make the `whisper.cpp` repo, download a model (`large-v3-turbo` is good, smaller models seem quite bad) like this:
+
+```bash
+bash ./models/download-ggml-model.sh large-v3-turbo
+```
+
+ and run this command: 
+
+```bash
+MODEL_PATH="/Users/thomasrialan/Documents/code/whisper.cpp/models/ggml-large-v3-turbo.bin"
+WHISPER_BIN="/Users/thomasrialan/Documents/code/whisper.cpp/build/bin/whisper-cli"
+"$WHISPER_BIN" -m "$MODEL_PATH" -f <file path here!> -oj -ml 1
+```
+
+`-ml 1` is max-length argument, meaning we want timestamps for each word, `-oj` means we want `.json` output.
+
+To convert `.mp3` to 16k mono `.wav`:
+
+```bash
+ffmpeg -i file.mp3 -ar 16000 -ac 1 file_16k_mono.wav
+```
+
+(I'm not certain this is necessary).
+
+### Flow2
+Currently we have to manually start and stop the Flow2 recording, however pre-processing takes care of aligning timestamps. So you can run `examples/task_demo.py`.
+
+Current steps:
+1. Do the steps to get the recording started,
+2. Stop the recording
+3. Wait a few mins for uploading to Kernel Cloud [this steps needs to be removed w/offline mode]
+4. Run the Moments pipeline
+5. Put the resulting .snirf file in the session folder (also done manually, sigh)
+6. Run pre-processing
 

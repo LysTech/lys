@@ -17,9 +17,8 @@ def test_lys_data_dir():
     lys_data_dir()
 
 def test_get_session_paths(tmp_path, monkeypatch):
-    # Setup mock data dir
-    data_dir = tmp_path
-    monkeypatch.setenv('LYS_DATA_DIR', str(data_dir))
+    # Patch get_subjects_dir to return tmp_path
+    monkeypatch.setattr("lys.utils.paths.get_subjects_dir", lambda: tmp_path)
     # Create subjects and sessions
     subjects = ['P01', 'P02']
     scanner = 'nirs'
@@ -28,13 +27,13 @@ def test_get_session_paths(tmp_path, monkeypatch):
     for subj in subjects:
         session_names = ['session1', 'session2']
         for sess in session_names:
-            session_path = data_dir / subj / scanner / experiment / sess
+            session_path = tmp_path / subj / scanner / experiment / sess
             session_path.mkdir(parents=True)
             expected_paths.append(session_path)
     # Add a non-matching subject
-    (data_dir / 'not_a_subject').mkdir()
+    (tmp_path / 'not_a_subject').mkdir()
     # Add a non-matching session folder
-    (data_dir / 'P01' / scanner / experiment / 'not_a_session').mkdir(parents=True)
+    (tmp_path / 'P01' / scanner / experiment / 'not_a_session').mkdir(parents=True)
     # Call get_session_paths
     found_paths = get_session_paths(experiment, scanner)
     # Should match expected session paths
@@ -77,3 +76,14 @@ def test_get_session_name_from_path():
         get_session_name_from_path(Path("/foo/bar/P03/nirs/exp1"))
     with pytest.raises(ValueError):
         get_session_name_from_path(Path("/foo/bar/03/nirs/exp1/session-01"))
+
+def test_create_session_path(monkeypatch, tmp_path):
+    monkeypatch.setenv('LYS_DATA_DIR', str(tmp_path))
+    from lys.utils.paths import create_session_path
+    subject = 'P03'
+    experiment_name = 'fnirs_8classes'
+    device = 'nirs'
+    session_int = 5
+    expected = tmp_path / "subjects" / subject / device / experiment_name / f"session-{session_int}"
+    result = create_session_path(subject, experiment_name, device, session_int)
+    assert result == expected

@@ -3,7 +3,7 @@ import bvbabel as bv
 from pathlib import Path
 from typing import Dict, Tuple, Any
 
-from .paths import lys_data_dir
+from lys.utils.paths import get_subjects_dir
 
 def get_mri_tstats(patient_name: str, task: str) -> np.ndarray:
     """
@@ -71,7 +71,7 @@ def _get_smp_file_path(patient_name: str) -> Path:
     Returns:
         Path to the SMP file containing t-stats
     """
-    data_dir = lys_data_dir()
+    data_dir = get_subjects_dir()
     smp_filename = f"{patient_name}_contrasts_MNI_min_prt_preprocessed_mtc_all_nothreshold.smp"
     return data_dir / patient_name / "func" / "t-stats" / smp_filename
 
