@@ -473,6 +473,16 @@ class PerceivedSpeechWidget(QWidget):
 
 
 if __name__ == "__main__":
-    session_path = Path(".")
+    from lys.interfaces.task import Task
+    from lys.utils.flow2_device_manager import Flow2DeviceManager
+    
+    subject = "thomas"
+    experiment_name = "perceived_speech"
+    device = "flow2"
+
     executor = PerceivedSpeechTaskExecutor()
-    executor.start(session_path)
+    device_manager = Flow2DeviceManager()
+    task = Task(executor, device_manager)
+    
+    session_path = task.make_new_session(subject, experiment_name, device)
+    task.start(session_path)

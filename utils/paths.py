@@ -95,8 +95,11 @@ def get_session_paths(experiment_name, scanner_name):
 
 def get_next_session_number(root: Path) -> int:
     """
-    Given a root path, find the next available session integer (N) for session-N folders.
+    Given an experiment root path, find the next available session integer (N) for session-N folders.
+    Raises FileNotFoundError if the root directory does not exist.
     """
+    if not root.exists():
+        raise FileNotFoundError(f"Experiment root directory does not exist: {root}")
     nums = []
     for p in root.iterdir():
         if p.is_dir():
