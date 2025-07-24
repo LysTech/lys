@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 import logging
 import json
-from typing import Iterator
+from typing import Iterator, Callable, Optional
 from utils.json_logging import setup_json_logging
 from interfaces.event import Event, PauseEvent, ResumeEvent, StartEvent
 from utils.paths import create_session_path, get_subjects_dir, get_next_session_number
@@ -10,13 +10,65 @@ from utils.paths import create_session_path, get_subjects_dir, get_next_session_
 class TaskExecutor(ABC):
     """
     Abstract base class for task executors.
-    Subclasses must implement _start(), which is called by start().
-    The base start() method logs a StartEvent and then delegates to _start().
-    All events must be logged via log_event().
-    For non-GUI executors, run_event_loop() can be used to log all events from event_stream().
+    
+    TaskExecutor coordinates with Task and DeviceManager through a callback-based pattern
+    to ensure accurate timing of device protocol markers with actual protocol execution.
+    
+    Callback Coordination Pattern:
+    - Task registers start/stop callbacks during initialization
+    - TaskExecutor calls _notify_start() when protocol actually begins (not GUI launch)
+    - This triggers Task to call DeviceManager.mark_protocol_start() at the right moment
+    - TaskExecutor calls _notify_stop() when protocol ends
+    - This triggers Task to call DeviceManager.mark_protocol_end() for protocol end marking
+    
+    Implementation Requirements:
+    1. Implement _start(session_path) for task-specific logic (GUI launch, etc.)
+    2. Call _notify_start() when actual protocol execution begins (event logging starts)
+    3. Call _notify_stop() when protocol execution ends
+    4. Use log_event() to record all protocol events
+    
+    Example timing for GUI-based executor:
+    - start() called → GUI launches, but protocol not yet started
+    - User interaction (e.g., clicks play) → call _notify_start() → device marks protocol start
+    - Protocol runs with event logging
+    - User stops or completion → call _notify_stop() → device marks protocol end
+    
+    For non-GUI executors, use run_event_loop() to automatically log events from event_stream().
     """
     def __init__(self):
         setup_json_logging()
+        self._on_stop_callback: Optional[Callable[[], None]] = None
+        self._on_start_callback: Optional[Callable[[], None]] = None
+
+    def set_on_stop_callback(self, callback: Callable[[], None]):
+        """
+        Register a callback to be called when the executor stops.
+        Used by Task to coordinate device manager finalisation.
+        """
+        self._on_stop_callback = callback
+
+    def set_on_start_callback(self, callback: Callable[[], None]):
+        """
+        Register a callback to be called when the executor actually starts the protocol.
+        Used by Task to coordinate device manager initialisation with actual protocol start.
+        """
+        self._on_start_callback = callback
+
+    def _notify_stop(self):
+        """
+        Notify registered callback that the executor is stopping.
+        Subclasses should call this when they are about to stop.
+        """
+        if self._on_stop_callback:
+            self._on_stop_callback()
+
+    def _notify_start(self):
+        """
+        Notify registered callback that the executor is actually starting the protocol.
+        Subclasses should call this when they begin actual event logging/protocol execution.
+        """
+        if self._on_start_callback:
+            self._on_start_callback()
 
     def log_event(self, event: Event):
         """Log an Event object as JSON."""

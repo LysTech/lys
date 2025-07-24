@@ -59,6 +59,7 @@ class RawSessionPreProcessor:
         
         raise ValueError(f"No suitable adapter found for session at {self.session_path}")
 
+
 class BettinaSessionAdapter(ISessionAdapter):
     def can_handle(self, session_path: Path) -> bool:
         """Check if this session contains the required .w;1 and .wl2 files for Bettina processing."""
@@ -132,26 +133,123 @@ class Flow2MomentsSessionAdapter(ISessionAdapter):
         }
 
     def _get_nirs_start_timestamp(self, snirf_data: snirf.Snirf) -> float:
-        """Extract absolute start time from metaDataTags and return as a UTC timestamp."""
-        meta = snirf_data.nirs[0].metaDataTags
-        assert hasattr(meta, 'MeasurementDate'), "metaDataTags must have 'MeasurementDate'"
-        assert hasattr(meta, 'MeasurementTime'), "metaDataTags must have 'MeasurementTime'"
-        date = getattr(meta, 'MeasurementDate')
-        time = getattr(meta, 'MeasurementTime')
-        absolute_start_time_str = f"{date}T{time}"
+        """
+        Extract protocol start time from stimulus events using Kernel SDK conventions.
+        
+        According to Kernel Tasks SDK documentation, the first event should be "start_experiment".
+        This method searches for experiment start events in the SNIRF stimulus data and uses
+        the timestamp for precise alignment.
+        
+        Raises ValueError if no valid start event is found, as metadata timestamps are unreliable.
+        """
+        
+        nirs = snirf_data.nirs[0]
+        
+        # Check if stim attribute exists
+        if not hasattr(nirs, 'stim'):
+            raise ValueError(
+                "No stimulus data found in SNIRF file. "
+                "Ensure that events were sent via Kernel Tasks SDK during recording. "
+                "Cannot determine protocol start time without stimulus events."
+            )
+        
+        # Check if stim is a list or has length
+        try:
+            stim_count = len(nirs.stim)
+        except (TypeError, AttributeError) as e:
+            raise ValueError(
+                f"Invalid stimulus data structure in SNIRF file: {e}. "
+                "Cannot determine protocol start time."
+            )
+        
+        if stim_count == 0:
+            raise ValueError(
+                "No stimulus events found in SNIRF file. "
+                "This suggests that no events were sent via Kernel Tasks SDK during recording. "
+                "Please ensure Flow2DeviceManager.mark_protocol_start() was called and "
+                "that events were properly recorded by kortex."
+            )
+        
+        # Search for valid start event according to Kernel SDK conventions
+        # Kortex converts snake_case event names to CamelCase when storing in SNIRF
+        # We only accept "StartExperiment" (what kortex stores for "start_experiment")
+        valid_start_event = "StartExperiment"
+        
+        for i in range(stim_count):
+            try:
+                stim_group = nirs.stim[i]
+                
+                # Check for name attribute
+                if hasattr(stim_group, 'name'):
+                    stim_name = getattr(stim_group, 'name')
+                    
+                    # Handle different name formats (string, bytes, array)
+                    if isinstance(stim_name, bytes):
+                        stim_name = stim_name.decode('utf-8')
+                    elif hasattr(stim_name, 'tolist'):  # numpy array
+                        stim_name = str(stim_name.tolist())
+                    elif hasattr(stim_name, '__iter__') and not isinstance(stim_name, str):
+                        # Handle other iterable types
+                        try:
+                            stim_name = str(list(stim_name)[0]) if len(list(stim_name)) > 0 else str(stim_name)
+                        except:
+                            stim_name = str(stim_name)
+                    
+                    stim_name = str(stim_name).strip()
+                    
+                    if stim_name == valid_start_event:
+                        
+                        # Extract timestamp from data field
+                        if hasattr(stim_group, 'data'):
+                            stim_data = getattr(stim_group, 'data')
+                            
+                            # Extract absolute timestamp from value field (4th column)
+                            absolute_timestamp = self._extract_timestamp_from_value_field(stim_data)
+                            print(f"✅ Stimulus start time: {absolute_timestamp}")
+                            
+                            return absolute_timestamp
+                        else:
+                            pass # No 'data' attribute found in '{stim_name}' stimulus
+                else:
+                    pass # No 'name' attribute found in stimulus group
+            
+            except Exception as e:
+                continue
+        
+        # If we get here, no valid start event was found
+        raise ValueError(
+            f"No valid experiment start event found in SNIRF stimulus data. "
+            f"Expected: {valid_start_event}. "
+            f"Note: Kernel kortex converts snake_case event names to CamelCase when storing in SNIRF. "
+            f"Please ensure Flow2DeviceManager is using proper Kernel SDK event names. "
+            f"Cannot determine protocol start time without valid stimulus events."
+        )
 
-        #TODO: double check this UTC stuff manually (its not mentioned in the docs)
-        # Convert start time to UTC timestamp
-        start_datetime = datetime.fromisoformat(absolute_start_time_str)
-        # check if timezone-aware, if not, assume UTC
-        if start_datetime.tzinfo is None:
-            start_datetime = start_datetime.replace(tzinfo=timezone.utc)
-        return start_datetime.timestamp()
+    def _extract_timestamp_from_value_field(self, stim_data) -> float:
+        """Extract the absolute timestamp from the value field (4th column) of stimulus data."""
+        
+        # In SNIRF, stim.data is typically a (n_events, 4) array: [onset, duration, amplitude, value]
+        # We want the value field (4th column, index 3) from the first event (row 0)
+        if hasattr(stim_data, 'shape') and len(stim_data.shape) >= 2:
+            if stim_data.shape[1] >= 4:  # Has at least 4 columns
+                absolute_timestamp = float(stim_data[0, 3])  # First row, 4th column (value field)
+                return absolute_timestamp
+            else:
+                raise ValueError(f"Stimulus data array has only {stim_data.shape[1]} columns, need at least 4 for value field")
+        elif hasattr(stim_data, '__len__') and len(stim_data) >= 4:
+            # Handle case where data might be 1D with at least 4 elements
+            absolute_timestamp = float(stim_data[3])  # 4th element (index 3)
+            return absolute_timestamp
+        else:
+            raise ValueError(f"Cannot extract absolute timestamp from stimulus data: {stim_data} (shape: {getattr(stim_data, 'shape', 'no shape')})")
 
     def _calculate_absolute_time_vector(self, nirs_data_block, start_timestamp: float) -> np.ndarray:
         """Create absolute time vector from relative time vector and start timestamp."""
         relative_time_vector = nirs_data_block.time
-        return relative_time_vector + start_timestamp
+        
+        absolute_time_vector = relative_time_vector + start_timestamp
+        
+        return absolute_time_vector
 
     def _build_channel_wavelength_maps(self, mlist) -> dict:
         """
@@ -212,7 +310,9 @@ class Flow2MomentsSessionAdapter(ISessionAdapter):
 
     def _align_with_protocol(self, data: np.ndarray, time_vector: np.ndarray, session_path: Path) -> tuple[np.ndarray, np.ndarray]:
         """Aligns NIRS data with the protocol start time by trimming the beginning."""
+        
         protocol_start_time = self._get_protocol_start_time(session_path)
+        print(f"✅ Protocol start time: {protocol_start_time}")
         
         alignment_index = self._find_alignment_index(time_vector, protocol_start_time)
         
@@ -226,12 +326,15 @@ class Flow2MomentsSessionAdapter(ISessionAdapter):
             
             actual_start_time = trimmed_time_vector[0]
             time_difference = abs(actual_start_time - protocol_start_time)
+            print(f"✅ Time difference: {time_difference:.6f} seconds")
             
             # The difference should be less than half a sample period.
             assert time_difference < (1 / fs) / 2, (
                 f"Time difference after alignment ({time_difference:.4f}s) is larger than "
                 f"half a sample period ({((1 / fs) / 2):.4f}s). Alignment failed."
             )
+        else:
+            pass # Skipping alignment validation (empty time vector or insufficient data)
 
         return trimmed_data, trimmed_time_vector
 
@@ -276,8 +379,9 @@ class Flow2MomentsSessionAdapter(ISessionAdapter):
 if __name__=="__main__":
     import os
     from lys.utils.paths import get_subjects_dir
-    session_path = Path(os.path.join(get_subjects_dir(), "thomas/flow2/perceived_speech/session-2"))
+    
+    session_path = Path(os.path.join(get_subjects_dir(), "thomas/flow2/perceived_speech/session-4"))
+    
     #processor = Flow2MomentsSessionAdapter()
-    processor = RawSessionPreProcessor(session_path)
-    data = processor.extract_data(session_path)
-    #ERROR: currently the nirs_start_time is wrong! sometimes? is it because they UTC and I don't?
+    RawSessionPreProcessor.preprocess(session_path)
+    
