@@ -39,7 +39,7 @@ coordinates = [(97.709549, 70.279701, 53.722301),
 (93.407166, 81.606064, 210.604065),
 (117.611732, 110.079796, 221.998001)]
 
-scene.remove(ts_data_mesh)
-points = Points(coordinates)
-scene.add(points).show()
+#scene.remove(ts_data_mesh)
+#points = Points(coordinates)
+#scene.add(points)
 
