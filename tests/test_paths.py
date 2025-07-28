@@ -2,7 +2,7 @@ import pytest
 import os
 from pathlib import Path
 from lys.utils.paths import check_file_exists, lys_data_dir, extract_patient_from_path, get_experiment_name_from_path, get_session_name_from_path
-from lys.objects.session import get_session_paths
+from lys.utils.paths import get_session_paths
 
 def test_check_file_exists():
     # Test with existing file
@@ -17,8 +17,8 @@ def test_lys_data_dir():
     lys_data_dir()
 
 def test_get_session_paths(tmp_path, monkeypatch):
-    # Patch get_subjects_dir to return tmp_path
-    monkeypatch.setattr("lys.utils.paths.get_subjects_dir", lambda: tmp_path)
+    # Patch lys_subjects_dir to return tmp_path
+    monkeypatch.setattr("lys.utils.paths.lys_subjects_dir", lambda: tmp_path)
     # Create subjects and sessions
     subjects = ['P01', 'P02']
     scanner = 'nirs'

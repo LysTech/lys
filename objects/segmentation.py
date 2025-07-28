@@ -6,7 +6,7 @@ import warnings
 
 from lys.objects.volume import from_jnii
 from lys.objects.atlas import Atlas
-from lys.utils.paths import check_file_exists, get_subjects_dir
+from lys.utils.paths import check_file_exists, lys_subjects_dir
 from lys.utils.strings import validate_patient_string
 from typing import Optional
 from pathlib import Path
@@ -25,6 +25,6 @@ def load_charm_segmentation(patient: str) -> Optional[Atlas]:
 
 
 def _segmentation_path(patient: str) -> Path:
-    root = get_subjects_dir()
+    root = lys_subjects_dir()
     return Path(root) / patient / "anat" / "volumes" / f"{patient}_7tissues.jnii"
 

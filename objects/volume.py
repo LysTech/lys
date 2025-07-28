@@ -3,7 +3,7 @@ import json
 import numpy as np
 import pprint
 
-from lys.interfaces.plottable import Plottable
+from lys.abstract_interfaces.plottable import Plottable
 
 
 class Volume(Plottable):

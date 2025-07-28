@@ -1,6 +1,6 @@
 from lys.objects.experiment import create_experiment
 from lys.processing.preprocessing import RawSessionPreProcessor
-from lys.objects.session import get_session_paths
+from lys.utils.paths import get_session_paths
 
 paths = get_session_paths("8classes", "nirs")
 for path in paths:

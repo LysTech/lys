@@ -9,7 +9,7 @@ from vtkmodules.qt.QVTKRenderWindowInteractor import (
 import vtk
 import numpy as np
 
-from lys.interfaces.plottable import Plottable
+from lys.abstract_interfaces.plottable import Plottable
 
 @dataclass
 class _Handle:

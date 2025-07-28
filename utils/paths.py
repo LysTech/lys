@@ -59,7 +59,7 @@ def get_session_name_from_path(path: Path) -> str:
     raise ValueError(f"Session name not found one level beneath experiment in path: {path}")
 
 
-def get_subjects_dir() -> Path:
+def lys_subjects_dir() -> Path:
     """
     Returns the Path to the subjects directory within the data directory.
     """
@@ -68,20 +68,20 @@ def get_subjects_dir() -> Path:
 
 def create_session_path(subject: str, experiment_name: str, device: str, session_int: int) -> Path:
     """
-    Create a session path rooted at get_subjects_dir(), e.g. {LYS_DATA_DIR}/subjects/{subject}/{experiment_name}/{date}/{session_id}
+    Create a session path rooted at lys_subjects_dir(), e.g. {LYS_DATA_DIR}/subjects/{subject}/{experiment_name}/{date}/{session_id}
     """
-    root = get_subjects_dir()
+    root = lys_subjects_dir()
     return root / subject / device / experiment_name / f"session-{session_int}"
 
 
 def get_session_paths(experiment_name, scanner_name):
     """
     Returns a list of Path objects for all session folders for the given experiment and scanner.
-    Each subject is a subfolder in get_subjects_dir() starting with 'P' followed by a number.
+    Each subject is a subfolder in lys_subjects_dir() starting with 'P' followed by a number.
     Within each subject, looks for scanner_name/experiment_name/session* folders.
     Only folders matching 'session' in their name are included.
     """
-    data_root = get_subjects_dir()
+    data_root = lys_subjects_dir()
     session_paths = []
     for subject_dir in data_root.iterdir():
         if subject_dir.is_dir():

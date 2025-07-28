@@ -4,8 +4,8 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Iterator, Tuple
 from dataclasses import dataclass
 from lys.utils.paths import check_file_exists, get_audio_assets_path
-from lys.interfaces.event import Event, PauseEvent, ResumeEvent
-from lys.interfaces.task_executor import TaskExecutor
+from lys.abstract_interfaces.event import Event, PauseEvent, ResumeEvent
+from lys.abstract_interfaces.task_executor import TaskExecutor
 import time
 from PyQt5.QtWidgets import QWidget, QPushButton, QHBoxLayout, QApplication, QFileDialog, QLabel, QVBoxLayout
 from PyQt5.QtCore import QTimer, pyqtSignal, QObject
@@ -572,7 +572,7 @@ class PerceivedSpeechGUI(QWidget):
 
 
 if __name__ == "__main__":
-    from lys.interfaces.task import Task
+    from lys.abstract_interfaces.task import Task
     from lys.data_recording.flow2_device_manager import Flow2DeviceManager
     
     subject = "thomas"

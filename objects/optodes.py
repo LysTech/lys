@@ -2,7 +2,7 @@ from typing import List, Tuple, Union
 import numpy as np
 import vtk
 
-from lys.interfaces.plottable import Plottable
+from lys.abstract_interfaces.plottable import Plottable
 
 #TODO: implement create_flow2_optodes_from_volume
 

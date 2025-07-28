@@ -4,7 +4,7 @@ from sklearn.decomposition import PCA
 from scipy import stats
 
 from lys.objects import Session
-from lys.interfaces.processing_step import ProcessingStep
+from lys.abstract_interfaces.processing_step import ProcessingStep
 
 fs = 3.4722  
 DPF = 6.0

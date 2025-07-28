@@ -180,7 +180,7 @@ The system uses the **Strategy pattern** to automatically select the appropriate
 
 ```python
 from lys.processing.preprocessing import RawSessionPreProcessor
-from lys.objects.session import get_session_paths
+from lys.utils.paths import get_session_paths
 from pathlib import Path
 
 # Process a single session:

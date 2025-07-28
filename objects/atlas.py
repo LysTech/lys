@@ -4,7 +4,7 @@ from typing import Dict, Optional, List, Tuple
 import colorsys
 from vtk.util import numpy_support
 
-from lys.interfaces.plottable import Plottable
+from lys.abstract_interfaces.plottable import Plottable
 
 
 class Atlas(Plottable):

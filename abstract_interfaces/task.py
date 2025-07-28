@@ -1,7 +1,7 @@
 from pathlib import Path
-from .task_executor import TaskExecutor
-from .device_manager import DeviceManager
-from utils.paths import create_session_path, get_subjects_dir, get_next_session_number
+from lys.abstract_interfaces.task_executor import TaskExecutor
+from lys.abstract_interfaces.device_manager import DeviceManager
+from lys.utils.paths import create_session_path, lys_subjects_dir, get_next_session_number
 
 class Task:
     """
@@ -68,7 +68,7 @@ class Task:
         Create a new session directory for the given subject, experiment, and device.
         Returns the session path.
         """
-        root = get_subjects_dir() / subject / device / experiment_name
+        root = lys_subjects_dir() / subject / device / experiment_name
         next_n = get_next_session_number(root)
         session_path = create_session_path(subject, experiment_name, device, next_n)
         return session_path

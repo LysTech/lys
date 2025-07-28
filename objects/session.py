@@ -8,11 +8,10 @@ from lys.objects.jacobian import load_jacobians_from_session_dir
 from lys.objects.patient import Patient
 from lys.objects.protocol import Protocol
 from lys.objects.jacobian import Jacobian
-from lys.utils.paths import extract_patient_from_path, get_subjects_dir, get_session_paths
+from lys.utils.paths import extract_patient_from_path
 
 #TODO: add a post-init method that checks time-alignment of everything
 #TODO: refactor using pull-up or something like that for generalisation
-#TODO: think: some experiments will have 2 wavelengths, some might have 6 -> is it ok that raw_data is dict (npz) as solution to this?
 
 @dataclass
 class Session:

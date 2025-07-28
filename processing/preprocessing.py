@@ -1,10 +1,8 @@
-from abc import ABC, abstractmethod
 from pathlib import Path
 import numpy as np
 import snirf
-from datetime import datetime, timezone
 
-from lys.interfaces import ISessionAdapter
+from lys.abstract_interfaces import ISessionAdapter
 
 """ 
 Preprocessing: turning raw files of fucked format into useful .npz files that can be loaded (for processing!)
@@ -21,13 +19,12 @@ How to use this code:
 RawSessionPreProcessor.preprocess(session_path)
 
 # Process a whole experiment:
-from lys.objects.session import get_session_paths
+from lys.utils.paths import get_session_paths
 paths = get_session_paths("experiment_name", "scanner_name")
 for path in paths:
     RawSessionPreProcessor.preprocess(path)
 """
 
-#TODO: BettinaSessionAdapter is a terrible name?
 #TODO: currently we don't do optodes stuff for BettinaSessionAdapter
 #TODO: generally figure out the optodes thing, see comment in Notion Architecture page
 
@@ -226,6 +223,7 @@ class Flow2MomentsSessionAdapter(ISessionAdapter):
         )
 
     def _extract_timestamp_from_value_field(self, stim_data) -> float:
+        #TODO: the if-else in here is slightly sus....
         """Extract the absolute timestamp from the value field (4th column) of stimulus data."""
         
         # In SNIRF, stim.data is typically a (n_events, 4) array: [onset, duration, amplitude, value]
@@ -378,10 +376,11 @@ class Flow2MomentsSessionAdapter(ISessionAdapter):
 
 if __name__=="__main__":
     import os
-    from lys.utils.paths import get_subjects_dir
+    from lys.utils.paths import lys_subjects_dir
     
-    session_path = Path(os.path.join(get_subjects_dir(), "thomas/flow2/perceived_speech/session-4"))
+    session_path = Path(os.path.join(lys_subjects_dir(), "P20/flow2/perceived_speech/session-1"))
     
-    #processor = Flow2MomentsSessionAdapter()
-    RawSessionPreProcessor.preprocess(session_path)
+    processor = Flow2MomentsSessionAdapter()
+    data = processor.extract_data(session_path)
+    #RawSessionPreProcessor.preprocess(session_path)
     

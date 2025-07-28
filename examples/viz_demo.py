@@ -3,7 +3,7 @@ from lys.objects.mesh import from_mat, StaticMeshData, TimeSeriesMeshData
 from lys.objects.segmentation import load_charm_segmentation
 from lys.objects.optodes import Points
 from lys.visualization.plot3d import VTKScene
-from lys.utils.paths import get_subjects_dir
+from lys.utils.paths import lys_subjects_dir
 import os
 
 """ Demo of 3D plots """
@@ -13,7 +13,7 @@ seg = load_charm_segmentation("P03")
 
 # Construct a mesh
 from pathlib import Path
-mesh_file = Path(get_subjects_dir()) / "P03" / "anat" / "meshes" / "P03_EIGMOD_MPR_IIHC_MNI_WM_LH_edited_again_RECOSM_D32k.mat"
+mesh_file = Path(lys_subjects_dir()) / "P03" / "anat" / "meshes" / "P03_EIGMOD_MPR_IIHC_MNI_WM_LH_edited_again_RECOSM_D32k.mat"
 mesh = from_mat(str(mesh_file))
 
 # Plot a timeseries on the mesh

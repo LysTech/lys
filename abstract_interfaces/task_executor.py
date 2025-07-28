@@ -3,9 +3,9 @@ from pathlib import Path
 import logging
 import json
 from typing import Iterator, Callable, Optional
-from utils.json_logging import setup_json_logging
-from interfaces.event import Event, PauseEvent, ResumeEvent, StartEvent
-from utils.paths import create_session_path, get_subjects_dir, get_next_session_number
+from lys.utils.json_logging import setup_json_logging
+from lys.abstract_interfaces.event import Event, PauseEvent, ResumeEvent, StartEvent
+from lys.utils.paths import create_session_path, lys_subjects_dir, get_next_session_number
 
 class TaskExecutor(ABC):
     """
@@ -108,7 +108,7 @@ class TaskExecutor(ABC):
         The session path is {LYS_DATA_DIR}/subjects/{subject}/{device}/{experiment_name}/session-{N},
         where N is the next available integer.
         """
-        root = get_subjects_dir() / subject / device / experiment_name
+        root = lys_subjects_dir() / subject / device / experiment_name
         root_existed = root.exists()
         root.mkdir(parents=True, exist_ok=True)
         if not root_existed:

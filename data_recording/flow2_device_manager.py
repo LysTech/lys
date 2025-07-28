@@ -1,4 +1,4 @@
-from lys.interfaces.device_manager import DeviceManager
+from lys.abstract_interfaces.device_manager import DeviceManager
 from pathlib import Path
 import json
 import socket

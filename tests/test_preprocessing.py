@@ -6,6 +6,68 @@ from unittest.mock import MagicMock, patch
 from processing.preprocessing import Flow2MomentsSessionAdapter
 
 
+def create_mock_snirf_with_stimulus(start_timestamp: float, n_timepoints: int = 5, 
+                                   n_channels: int = 2, n_wavelengths: int = 2, 
+                                   n_moments: int = 3, fs: float = 10.0) -> MagicMock:
+    """
+    Create a mock SNIRF object with proper stimulus events for testing.
+    
+    Args:
+        start_timestamp: Absolute timestamp to put in stimulus event
+        n_timepoints: Number of time points in the data
+        n_channels: Number of channels (source-detector pairs)
+        n_wavelengths: Number of wavelengths
+        n_moments: Number of moments (amplitude, mean time, variance)
+        fs: Sampling frequency in Hz
+    
+    Returns:
+        Mock SNIRF object with stimulus events and data
+    """
+    # Build measurement list
+    class FakeM:
+        def __init__(self, src, det, wav, dtype_idx, dunit):
+            self.sourceIndex = src
+            self.detectorIndex = det
+            self.wavelengthIndex = wav
+            self.dataTypeIndex = dtype_idx
+            self.dataUnit = dunit
+
+    mlist = []
+    for ch in range(1, n_channels + 1):
+        for wav in range(1, n_wavelengths + 1):
+            for moment_idx, (dtype, unit) in enumerate([(2, ''), (1, 'ps'), (3, 'ps^2')]):
+                if moment_idx < n_moments:
+                    mlist.append(FakeM(ch, ch, wav, dtype, unit))
+
+    # Create fake data
+    fake_data = np.arange(n_timepoints * len(mlist)).reshape(n_timepoints, len(mlist))
+    relative_time = np.linspace(0, (n_timepoints - 1) / fs, n_timepoints)
+
+    # Create data block
+    fake_data_block = MagicMock()
+    fake_data_block.measurementList = mlist
+    fake_data_block.dataTimeSeries = fake_data
+    fake_data_block.time = relative_time
+
+    # Create stimulus event with "StartExperiment" 
+    fake_stim = MagicMock()
+    fake_stim.name = "StartExperiment"
+    # SNIRF stimulus format: [onset, duration, amplitude, value]
+    # Put absolute timestamp in value field (4th column, index 3)
+    fake_stim.data = np.array([[0.0, 1.0, 1.0, start_timestamp]])
+
+    # Create NIRS object
+    fake_nirs = MagicMock()
+    fake_nirs.data = [fake_data_block]
+    fake_nirs.stim = [fake_stim]
+
+    # Create SNIRF object
+    fake_snirf = MagicMock()
+    fake_snirf.nirs = [fake_nirs]
+
+    return fake_snirf
+
+
 def write_dummy_file(path: Path, data: np.ndarray):
     """Write a 2D numpy array to a text file, row by row."""
     np.savetxt(path, data)
@@ -121,59 +183,30 @@ def test_flow2_extract_data_shape_and_metadata(monkeypatch, tmp_path):
     with open(log_file, 'w') as f:
         json.dump({'timestamp': protocol_start_timestamp, 'event': 'start'}, f)
 
-    # Create a fake snirf file
+        # Create a fake snirf file
     fake_file = tmp_path / 'bar_MOMENTS.snirf'
     fake_file.touch()
 
-    # Mock the snirf.Snirf object and its structure
+    # Define test parameters
     n_timepoints = 5
     n_channels = 2
     n_wavelengths = 2
     n_moments = 3
-    # Build fake measurementList
-    class FakeM:
-        def __init__(self, src, det, wav, dtype_idx, dunit):
-            self.sourceIndex = src
-            self.detectorIndex = det
-            self.wavelengthIndex = wav
-            self.dataTypeIndex = dtype_idx
-            self.dataUnit = dunit
-    mlist = [
-        FakeM(1, 1, 1, 2, ''),   # amplitude
-        FakeM(1, 1, 1, 1, 'ps'), # mean time
-        FakeM(1, 1, 1, 3, 'ps^2'), # variance
-        FakeM(1, 1, 2, 2, ''),
-        FakeM(1, 1, 2, 1, 'ps'),
-        FakeM(1, 1, 2, 3, 'ps^2'),
-        FakeM(2, 2, 1, 2, ''),
-        FakeM(2, 2, 1, 1, 'ps'),
-        FakeM(2, 2, 1, 3, 'ps^2'),
-        FakeM(2, 2, 2, 2, ''),
-        FakeM(2, 2, 2, 1, 'ps'),
-        FakeM(2, 2, 2, 3, 'ps^2'),
-    ]
-    # Fake data: (n_timepoints, n_measurements)
-    fake_data = np.arange(n_timepoints * len(mlist)).reshape(n_timepoints, len(mlist))
-    # The time vector in SNIRF is relative to the start time
-    relative_time = np.linspace(0, (n_timepoints - 1) / 10.0, n_timepoints) # assume 10Hz
-    
-    fake_data_block = MagicMock()
-    fake_data_block.measurementList = mlist
-    fake_data_block.dataTimeSeries = fake_data
-    fake_data_block.time = relative_time
-    
-    # --- Mock metadata for start time calculation (this was the missing part) ---
-    fake_meta = MagicMock()
-    fake_meta.MeasurementDate = start_time.strftime('%Y-%m-%d')
-    fake_meta.MeasurementTime = start_time.strftime('%H:%M:%S')
+    fs = 10.0
 
-    fake_nirs = MagicMock()
-    fake_nirs.data = [fake_data_block]
-    fake_nirs.metaDataTags = fake_meta
+    # Calculate relative time (needed for assertions)
+    relative_time = np.linspace(0, (n_timepoints - 1) / fs, n_timepoints)
 
-    fake_snirf = MagicMock()
-    fake_snirf.nirs = [fake_nirs]
-    
+    # Create mock SNIRF object using our helper
+    fake_snirf = create_mock_snirf_with_stimulus(
+        start_timestamp=protocol_start_timestamp,
+        n_timepoints=n_timepoints,
+        n_channels=n_channels,
+        n_wavelengths=n_wavelengths,
+        n_moments=n_moments,
+        fs=fs
+    )
+
     # Patch snirf.Snirf to return our fake object
     with patch('snirf.Snirf', return_value=fake_snirf):
         adapter = Flow2MomentsSessionAdapter()
@@ -218,29 +251,16 @@ def test_flow2_adapter_aligns_with_protocol(monkeypatch, tmp_path):
     fake_snirf_file = tmp_path / 'test_MOMENTS.snirf'
     fake_snirf_file.touch()
 
-    # 4. Mock the snirf.Snirf object and its data
-    # Create a time vector for the NIRS data
-    nirs_time_vector = np.linspace(
-        nirs_start_time.timestamp(),
-        nirs_start_time.timestamp() + (n_timepoints - 1) / fs,
-        n_timepoints
+    # 4. Create mock SNIRF object with stimulus event containing NIRS start timestamp
+    # The stimulus event should contain the NIRS start time, not the protocol start time
+    fake_snirf_obj = create_mock_snirf_with_stimulus(
+        start_timestamp=nirs_start_time.timestamp(),
+        n_timepoints=n_timepoints,
+        n_channels=1,  # Minimal for this test
+        n_wavelengths=1,
+        n_moments=1,
+        fs=fs
     )
-
-    fake_data_block = MagicMock()
-    fake_data_block.dataTimeSeries = np.random.rand(n_timepoints, 1) # Shape doesn't matter here
-    fake_data_block.time = nirs_time_vector - nirs_time_vector[0] # snirf time is relative
-    fake_data_block.measurementList = [MagicMock()] # Minimal mock
-
-    fake_meta = MagicMock()
-    fake_meta.MeasurementDate = nirs_start_time.strftime('%Y-%m-%d')
-    fake_meta.MeasurementTime = nirs_start_time.strftime('%H:%M:%S')
-
-    fake_nirs = MagicMock()
-    fake_nirs.data = [fake_data_block]
-    fake_nirs.metaDataTags = fake_meta
-
-    fake_snirf_obj = MagicMock()
-    fake_snirf_obj.nirs = [fake_nirs]
     
     # 5. Run the adapter with the mocked snirf object
     adapter = Flow2MomentsSessionAdapter()
