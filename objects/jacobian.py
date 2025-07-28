@@ -6,7 +6,7 @@ from pathlib import Path
 
 from lys.utils import lys_data_dir
 import os
-from typing import Union
+from typing import Union, Optional
 
 #TODO: reflect on the multi-wavelength thing
 
@@ -216,7 +216,7 @@ class JacobianFactory:
 _jacobian_factory = JacobianFactory()
 
 
-def load_jacobians_from_session_dir(session_dir: Path) -> list[Union[Jacobian, None]]:
+def load_jacobians_from_session_dir(session_dir: Path) -> Optional[list[Jacobian]]:
     """
     Loads all Jacobian files in a given session directory.
 
@@ -224,15 +224,15 @@ def load_jacobians_from_session_dir(session_dir: Path) -> list[Union[Jacobian, N
         session_dir: A Path object pointing to the session directory.
 
     Returns:
-        A list of Jacobian objects loaded from the corresponding files, or [None] if none are found.
+        A list of Jacobian objects loaded from the corresponding files, or None if none are found.
     """
-    jacobian_files = _find_jacobian_files(session_dir, suppress_error=True)
-    if not jacobian_files:
-        #TODO: is this bad code? I'm not sure.
-        warnings.warn(f"No Jacobian files found in {session_dir}. Returning [None].")
-        return [None]
-    print(f"Found {len(jacobian_files)} Jacobian file(s) in {session_dir}")
-    return [_jacobian_factory.get(path) for path in jacobian_files]
+    try:
+        jacobian_files = _find_jacobian_files(session_dir)
+        print(f"Found {len(jacobian_files)} Jacobian file(s) in {session_dir}")
+        return [_jacobian_factory.get(path) for path in jacobian_files]
+    except FileNotFoundError:
+        warnings.warn(f"No Jacobian files found in {session_dir}. Returning None.")
+        return None
 
 
 def _extract_wavelength_from_path(path: str) -> str:
@@ -257,22 +257,22 @@ def _extract_wavelength_from_path(path: str) -> str:
         raise ValueError(f"Could not determine wavelength from path: {path}")
 
 
-def _find_jacobian_files(session_dir: Path, suppress_error: bool = False) -> list[Path]:
+def _find_jacobian_files(session_dir: Path) -> list[Path]:
     """
     Finds all files in the session directory with 'jacobian' in their name.
     Files are sorted by filename for consistent ordering.
 
     Args:
         session_dir: A Path object pointing to the session directory.
-        suppress_error: If True, do not raise FileNotFoundError, just return an empty list.
 
     Returns:
         A list of Path objects for Jacobian files, sorted by filename.
+        
+    Raises:
+        FileNotFoundError: If no Jacobian files are found in the directory.
     """
     jacobian_files = [f for f in session_dir.iterdir() if 'jacobian' in f.name.lower()]
     if not jacobian_files:
-        if suppress_error:
-            return []
         raise FileNotFoundError(f"No Jacobian file found in {session_dir}")
     return sorted(jacobian_files)
 

@@ -7,7 +7,15 @@ TODO:
 - (lots of #TODO tags throughout the code, grep for them and fix)
 - I've not implemented Tasks and stuff related to recording new data, this is the next big thing after code review
 
+## Data Folder Structure
+
+<p align="center">
+  <img src="assets/data_structure.png" alt="Data folder structure diagram" width="600"/>
+</p>
+
 ## Table of Contents
+
+- [Data Folder Structure](#data-folder-structure)
 
 - [Demo Usage](#demo-usage)
   - [Processing Demo](#processing-demo)
@@ -19,7 +27,6 @@ TODO:
 - [Jacobian](#jacobian)
 - [Eigenmodes](#eigenmodes)
 - [Data Directory Setup](#data-directory-setup)
-- [Data Folder Structure](#data-folder-structure)
 
 ## Demo Usage
 
