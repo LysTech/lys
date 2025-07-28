@@ -40,6 +40,8 @@ experiment = create_experiment(experiment_name, "nirs")
 experiment = experiment.filter_by_subjects(["P03"])
 ```
 
+`create_experiment` takes 2 arguments: the experiment name, and the type of device. Currently we support two types of devices: "nirs" (which is Bettina's device) and "flow2" (our device).
+
 An experiment is a list of sessions, `create_experiment` finds the folder in your file structure called "fnirs_8classes" and constructs an `Experiment` object. It can be filtered by subject. Once you've loaded an experiment, you may want to check that your meshes and volumes are aligned. Below we do that for the first session (different sessions may have different patients):
 
 ```python
@@ -53,7 +55,7 @@ scene.add(mesh).add(segmentation).format(segmentation, opacity=0.02).show()
 
 Notice the use of `.format()`, this is a general method for styling (see [Visualization](#visualization) for details) which we use here to reduce the opacity of the segmentation so that the mesh is visible underneath.
 
-Then you may want to do some processing. In this codebase we distinguish pre-processing from processing in the following manner: pre-processing means turning raw files (e.g. `.snirf`) into numpy arrays, and processing means stuff like bandpass filtering. We consider reconstruction a form of processing.
+Then you may want to do some processing. In this codebase we distinguish pre-processing from processing in the following manner: pre-processing means turning raw files (e.g. `.snirf`) into numpy arrays (see e.g. the `raw_channel_data.npz` in [Data Folder Structure](#data-folder-structure)), and processing means stuff like bandpass filtering. We consider reconstruction a form of processing.
 
 ```python
 config = [
@@ -71,22 +73,24 @@ experiment = processing_pipeline.apply(experiment)
 
 What `processing_pipeline.apply()` does is for each session, it loops through each processing step in the order they're listed, and applies that step's `.process()` method to the session's `processed_data` attribute. Each `ProcessingStep` has keyword arguments, these are specified as above for `ReconstructWithEigenmodes`.
 
+- [ ] We may want to re-architect steps or processing so that stuff can happen "live", and then we'd fold pre-processing into processing and write the code such that non-live data is treated as live.
 
 ## Notes on Project Architecture
-- We keep abstract classes in `/interfaces`, this is good for readability / future users of the code to easily find concepts.
+- We keep abstract classes in `/abstract_interfaces`, this is good for readability / future users of the code to easily find concepts.
 - We have many "domain objects", like a mesh, an optode, a session etc. These are kept in `/objects` for the same reason as above.
-- We want to treat this as a library, like our internal numpy, and then use the tool for our work. Not sure if this should be a separate repo, or just go in `/exa,ples`.
+- We want to treat this as a library, like our internal numpy, and then use the tool for our work.
+- Our work (outside building this library) should mostly happen inside `/research` and `steps.py`. 
+  - [ ] TBD if this is the best way, goal is to separate library from messy R&D code.
 
 ## Examples folder
 
-The `/examples` directory contains example scripts that demonstrate how to use the Lys library. This separation of concerns keeps the core library code (in `/objects`, `/visualization`, and `/utils`) stable and reusable, while allowing experimentation and result generation to happen in dedicated script files. The scripts include:
+This is a good place to start learning how the code works. The `/examples` directory contains example scripts that demonstrate how to use the library. The scripts include:
 
 - `processing_demo.py`: Demonstrates a complete experiment processing pipeline including wavelength conversion, hemoglobin reconstruction, scalp effect removal, t-statistics conversion, and eigenmode-based reconstruction with correlation analysis against MRI t-stats
 - `viz_demo.py`: Shows 3D visualization capabilities with meshes and optodes
 
 
 ## Visualization
-
 ### 3D plots
 
 The idea is to respect the Open-Closed principle + have composability. Whenever we define a new object that we want to be able to plot, it just needs to have a `to_vtk` method that returns a vtkActor and the `VTKScene` class can plot it. 
