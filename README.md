@@ -5,16 +5,21 @@ Breaking change in latest merge: now the data structure shouldn't be data/P03, b
 ## Table of Contents
 
 - [Data Folder Structure](#data-folder-structure)
+- [Data Directory Setup](#data-directory-setup)
 - [Demo Usage](#demo-usage)
   - [Processing Demo](#processing-demo)
+- [Notes on Project Architecture](#notes-on-project-architecture)
+- [Examples folder](#examples-folder)
 - [Visualization](#visualization)
   - [3D plots](#3d-plots)
   - [Channel Data Plots](#channel-data-plots)
 - [Preprocessing](#preprocessing)
-- [Patient Class](#patient-class)
-- [Jacobian](#jacobian)
-- [Eigenmodes](#eigenmodes)
-- [Data Directory Setup](#data-directory-setup)
+- [Some of our objects](#some-of-our-objects)
+  - [Patient Class](#patient-class)
+  - [Jacobian](#jacobian)
+  - [Eigenmodes](#eigenmodes)
+- [Notes on recording perceived speech data](#notes-on-recording-perceived-speech-data)
+  - [Flow2](#flow2)
 
 TODO:
 - (lots of #TODO tags throughout the code, grep for them and fix)
@@ -25,6 +30,22 @@ TODO:
   <img src="assets/data_structure.png" alt="Data folder structure diagram" width="600"/>
 </p>
 
+## Data Directory Setup
+
+Before using Lys, you must set the `LYS_DATA_DIR` environment variable in your shell configuration (e.g., `.bashrc`, `.zshrc`). This variable should point to the root directory where your data is stored. For example:
+
+```bash
+LYS_DATA_DIR="/Users/thomasrialan/Documents/code/Geometric-Eigenmodes/data"
+export LYS_DATA_DIR
+```
+
+Make sure to restart your terminal or source your shell configuration after making this change:
+
+```bash
+source ~/.bashrc  # or source ~/.zshrc
+```
+
+This is cool because now we can call `lys.utils.paths.lys_data_dir()` and even if we have different computers it'll work for us all.
 ## Demo Usage
 
 We have some demo scripts in `/scripts`, here we discuss them a bit.
@@ -101,7 +122,7 @@ A few examples:
 from lys.objects.mesh import from_mat, StaticMeshData
 from lys.visualization.plot3d import VTKScene
 
-# Load a mesh from a MATLAB file
+# Load a mesh from a MATLAB file, could also do load_unMNI_mesh("P03")
 mesh = from_mat("/path/to/mesh.mat")
 
 # Create and show the visualization
@@ -113,7 +134,7 @@ scene.show(title="A New Title!")
 scene.remove(mesh)
 
 # If you want data on the mesh, e.g. t-stats
-data = np.random.rand(mesh.vertices.shape[0])) * 3 #these are between 0 and 3
+data = np.random.rand(mesh.vertices.shape[0])) * 3 #random numbers
 static_data_mesh = StaticMeshData(mesh, data) 
 scene.add(static_data_mesh) .show()
 ```
@@ -201,15 +222,28 @@ for path in paths:
     RawSessionPreProcessor.preprocess(path)
 ```
 
+
 **How It Works:**
 
 1. **Automatic Adapter Selection**: The `RawSessionPreProcessor` automatically detects the appropriate adapter by examining the files in the session directory
 2. **Device-Specific Processing**: Each adapter (like `BettinaSessionAdapter`) handles the specific file formats and data extraction for that device
 3. **Standardized Output**: All adapters produce `.npz` files with consistent naming (`raw_channel_data.npz`) for easy loading
 
+If you just want to check what a preprocessor does you could also do this:
+
+```
+    import os
+    from lys.utils.paths import lys_subjects_dir
+    
+    session_path = Path(os.path.join(lys_subjects_dir(), "P20/flow2/perceived_speech/session-1"))
+    processor = Flow2MomentsSessionAdapter()
+    data = processor.extract_data(session_path)
+```
+
 **Current Supported Devices:**
 
 - **Bettina Device**: Processes `.wl1` and `.wl2` files, extracting wavelength-specific data
+- **Flow2Moments**: processes `.snirf` files from the `MOMENTS` pipeline (not yet the `HB_MOMENTS` or others, but easy to extend when we want this.)
 
 **Extending for New Devices:**
 
@@ -230,26 +264,10 @@ class NewDeviceAdapter(ISessionAdapter):
 
 The system will automatically detect and use your new adapter when processing sessions that contain the appropriate files.
 
-## Data Directory Setup
-
-Before using Lys, you must set the `LYS_DATA_DIR` environment variable in your shell configuration (e.g., `.bashrc`, `.zshrc`). This variable should point to the root directory where your data is stored. For example:
-
-```bash
-LYS_DATA_DIR="/Users/thomasrialan/Documents/code/Geometric-Eigenmodes/data"
-export LYS_DATA_DIR
-```
-
-Make sure to restart your terminal or source your shell configuration after making this change:
-
-```bash
-source ~/.bashrc  # or source ~/.zshrc
-```
-
-This is cool because now we can call `lys.utils.paths.lys_data_dir()` and even if we have different computers it'll work for us all.
-
+## Some of our objects
 ### Patient Class
 
-The `Patient` class represents a subject with their associated brain segmentation and surface mesh. It is designed as an immutable (frozen) dataclass to ensure that once a `Patient` object is created, its attributes cannot be changed. This immutability helps prevent accidental modification of patient data, making the codebase safer and easier to reason about, especially when passing patient objects between functions or threads.
+The `Patient` class represents a subject: it has a name, a segmentation and a mesh. It is a frozen dataclass, i.e. immutable, which avoids potential errors down the line.
 
 **How to Instantiate a Patient**
 
