@@ -68,8 +68,8 @@ def test_load_eigenmodes():
         mock_loadmat.return_value = mock_mdata
         
         # Mock the path to avoid file system dependencies
-        with patch('lys.objects.eigenmodes.lys_data_dir') as mock_lys_data_dir:
-            mock_lys_data_dir.return_value = MagicMock()
+        with patch('lys.objects.eigenmodes.lys_subjects_dir') as mock_lys_subjects_dir:
+            mock_lys_subjects_dir.return_value = MagicMock()
             
             eigenmodes = load_eigenmodes("P03")
             
@@ -98,8 +98,8 @@ def test_load_eigenmodes_assertion_error():
         mock_loadmat.return_value = mock_mdata
         
         # Mock the path to avoid file system dependencies
-        with patch('lys.objects.eigenmodes.lys_data_dir') as mock_lys_data_dir:
-            mock_lys_data_dir.return_value = MagicMock()
+        with patch('lys.objects.eigenmodes.lys_subjects_dir') as mock_lys_subjects_dir:
+            mock_lys_subjects_dir.return_value = MagicMock()
             
             with pytest.raises(AssertionError, match="Number of eigenvalues must match number of eigenmodes"):
                 load_eigenmodes("P03") 

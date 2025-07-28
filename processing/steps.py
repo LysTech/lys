@@ -5,7 +5,7 @@ from scipy import stats
 from scipy.signal import convolve
 from scipy.stats import gamma
 from lys.objects import Session
-from lys.interfaces.processing_step import ProcessingStep
+from lys.abstract_interfaces.processing_step import ProcessingStep
 
 fs = 3.4722
 DPF = 6.0

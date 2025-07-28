@@ -8,11 +8,10 @@ from lys.objects.jacobian import load_jacobians_from_session_dir
 from lys.objects.patient import Patient
 from lys.objects.protocol import Protocol
 from lys.objects.jacobian import Jacobian
-from lys.utils.paths import lys_data_dir, extract_patient_from_path
+from lys.utils.paths import extract_patient_from_path
 
 #TODO: add a post-init method that checks time-alignment of everything
 #TODO: refactor using pull-up or something like that for generalisation
-#TODO: think: some experiments will have 2 wavelengths, some might have 6 -> is it ok that raw_data is dict (npz) as solution to this?
 
 @dataclass
 class Session:
@@ -120,23 +119,4 @@ def create_session(path: Path):
 
     session = Session(**session_kwargs)
     return session
-
-
-def get_session_paths(experiment_name, scanner_name):
-    """
-    Returns a list of Path objects for all session folders for the given experiment and scanner.
-    Each subject is a subfolder in lys_data_dir() starting with 'P' followed by a number.
-    Within each subject, looks for scanner_name/experiment_name/session* folders.
-    Only folders matching 'session' in their name are included.
-    """
-    data_root = lys_data_dir()
-    session_paths = []
-    for subject_dir in data_root.iterdir():
-        if subject_dir.is_dir() and subject_dir.name.startswith('P') and subject_dir.name[1:].isdigit():
-            experiment_dir = subject_dir / scanner_name / experiment_name
-            if experiment_dir.exists() and experiment_dir.is_dir():
-                for session_dir in experiment_dir.iterdir():
-                    if session_dir.is_dir() and session_dir.name.lower().startswith('session'):
-                        session_paths.append(session_dir)
-    return session_paths
     

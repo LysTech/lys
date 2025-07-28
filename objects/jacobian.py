@@ -6,6 +6,7 @@ from pathlib import Path
 
 from lys.utils import lys_data_dir
 import os
+from typing import Union, Optional
 
 #TODO: reflect on the multi-wavelength thing
 
@@ -215,7 +216,7 @@ class JacobianFactory:
 _jacobian_factory = JacobianFactory()
 
 
-def load_jacobians_from_session_dir(session_dir: Path) -> list[Jacobian]:
+def load_jacobians_from_session_dir(session_dir: Path) -> Optional[list[Jacobian]]:
     """
     Loads all Jacobian files in a given session directory.
 
@@ -223,13 +224,15 @@ def load_jacobians_from_session_dir(session_dir: Path) -> list[Jacobian]:
         session_dir: A Path object pointing to the session directory.
 
     Returns:
-        A list of Jacobian objects loaded from the corresponding files.
+        A list of Jacobian objects loaded from the corresponding files, or None if none are found.
     """
-    jacobian_files = _find_jacobian_files(session_dir)
-    print(f"Found {len(jacobian_files)} Jacobian file(s) in {session_dir}")
-    jacobian_files = _find_jacobian_files(session_dir)
-    #TODO: I think it may be bad code, ordering by wavelength is sorta implicit, BAD!
-    return [_jacobian_factory.get(path) for path in jacobian_files]
+    try:
+        jacobian_files = _find_jacobian_files(session_dir)
+        print(f"Found {len(jacobian_files)} Jacobian file(s) in {session_dir}")
+        return [_jacobian_factory.get(path) for path in jacobian_files]
+    except FileNotFoundError:
+        warnings.warn(f"No Jacobian files found in {session_dir}. Returning None.")
+        return None
 
 
 def _extract_wavelength_from_path(path: str) -> str:
@@ -264,11 +267,13 @@ def _find_jacobian_files(session_dir: Path) -> list[Path]:
 
     Returns:
         A list of Path objects for Jacobian files, sorted by filename.
+        
+    Raises:
+        FileNotFoundError: If no Jacobian files are found in the directory.
     """
     jacobian_files = [f for f in session_dir.iterdir() if 'jacobian' in f.name.lower()]
     if not jacobian_files:
         raise FileNotFoundError(f"No Jacobian file found in {session_dir}")
-    
     return sorted(jacobian_files)
 
 

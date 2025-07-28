@@ -4,7 +4,8 @@ from pathlib import Path
 import numpy as np
 from typing import Dict, List, Sequence
 
-from lys.objects.session import Session, create_session, get_session_paths, _load_npz_or_error
+from lys.objects.session import Session, create_session, _load_npz_or_error
+from lys.utils.paths import get_session_paths
 from lys.objects import Patient, Protocol, Jacobian
 
 

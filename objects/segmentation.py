@@ -2,23 +2,29 @@
     contains loader functions.
 """
 import numpy as np
-import os
+import warnings
 
 from lys.objects.volume import from_jnii
 from lys.objects.atlas import Atlas
-from lys.utils.paths import lys_data_dir, check_file_exists
+from lys.utils.paths import check_file_exists, lys_subjects_dir
 from lys.utils.strings import validate_patient_string
+from typing import Optional
+from pathlib import Path
 
 
-def load_charm_segmentation(patient: str) -> Atlas:
+def load_charm_segmentation(patient: str) -> Optional[Atlas]:
     validate_patient_string(patient)
-    path = _segmentation_path(patient)
-    check_file_exists(path)
-    volume = from_jnii(path)
+    path_obj = _segmentation_path(patient)
+    if not path_obj.exists():
+        #TODO: is this bad code? I'm not sure.
+        warnings.warn(f"Segmentation file not found for patient {patient} at {path_obj}. Returning None.")
+        return None
+    check_file_exists(str(path_obj))
+    volume = from_jnii(str(path_obj))
     return Atlas(volume.array.astype(np.int32))
 
 
-def _segmentation_path(patient: str) -> str:
-    root = lys_data_dir()
-    return os.path.join(root, patient, "anat", "volumes", f"{patient}_7tissues.jnii")
+def _segmentation_path(patient: str) -> Path:
+    root = lys_subjects_dir()
+    return Path(root) / patient / "anat" / "volumes" / f"{patient}_7tissues.jnii"
 

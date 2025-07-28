@@ -1,24 +1,51 @@
 # Lys
 
-TODO:
-- most important one is to sit down with Anthony and/or Nyx and get input on this / maybe we can re-diagram things and have a second think now that lots of stuff is implemented -> there'll probably be some good refactors to do. I think the code is sufficiently modular that this shouldn't be too hard (??)
-- (lots of #TODO tags throughout the code, grep for them and fix)
-- I've not implemented Tasks and stuff related to recording new data, this is the next big thing after code review
+Breaking change in latest merge: now the data structure shouldn't be data/P03, but data/subjects/P03.
 
 ## Table of Contents
 
+- [Data Folder Structure](#data-folder-structure)
+- [Data Directory Setup](#data-directory-setup)
 - [Demo Usage](#demo-usage)
   - [Processing Demo](#processing-demo)
+- [Notes on Project Architecture](#notes-on-project-architecture)
+- [Examples folder](#examples-folder)
 - [Visualization](#visualization)
   - [3D plots](#3d-plots)
   - [Channel Data Plots](#channel-data-plots)
 - [Preprocessing](#preprocessing)
-- [Patient Class](#patient-class)
-- [Jacobian](#jacobian)
-- [Eigenmodes](#eigenmodes)
-- [Data Directory Setup](#data-directory-setup)
-- [Data Folder Structure](#data-folder-structure)
+- [Some of our objects](#some-of-our-objects)
+  - [Patient Class](#patient-class)
+  - [Jacobian](#jacobian)
+  - [Eigenmodes](#eigenmodes)
+- [Notes on recording perceived speech data](#notes-on-recording-perceived-speech-data)
+  - [Flow2](#flow2)
 
+TODO:
+- (lots of #TODO tags throughout the code, grep for them and fix)
+
+## Data Folder Structure
+
+<p align="center">
+  <img src="assets/data_structure.png" alt="Data folder structure diagram" width="600"/>
+</p>
+
+## Data Directory Setup
+
+Before using Lys, you must set the `LYS_DATA_DIR` environment variable in your shell configuration (e.g., `.bashrc`, `.zshrc`). This variable should point to the root directory where your data is stored. For example:
+
+```bash
+LYS_DATA_DIR="/Users/thomasrialan/Documents/code/Geometric-Eigenmodes/data"
+export LYS_DATA_DIR
+```
+
+Make sure to restart your terminal or source your shell configuration after making this change:
+
+```bash
+source ~/.bashrc  # or source ~/.zshrc
+```
+
+This is cool because now we can call `lys.utils.paths.lys_data_dir()` and even if we have different computers it'll work for us all.
 ## Demo Usage
 
 We have some demo scripts in `/scripts`, here we discuss them a bit.
@@ -34,6 +61,8 @@ experiment = create_experiment(experiment_name, "nirs")
 experiment = experiment.filter_by_subjects(["P03"])
 ```
 
+`create_experiment` takes 2 arguments: the experiment name, and the type of device. Currently we support two types of devices: "nirs" (which is Bettina's device) and "flow2" (our device).
+
 An experiment is a list of sessions, `create_experiment` finds the folder in your file structure called "fnirs_8classes" and constructs an `Experiment` object. It can be filtered by subject. Once you've loaded an experiment, you may want to check that your meshes and volumes are aligned. Below we do that for the first session (different sessions may have different patients):
 
 ```python
@@ -47,7 +76,7 @@ scene.add(mesh).add(segmentation).format(segmentation, opacity=0.02).show()
 
 Notice the use of `.format()`, this is a general method for styling (see [Visualization](#visualization) for details) which we use here to reduce the opacity of the segmentation so that the mesh is visible underneath.
 
-Then you may want to do some processing. In this codebase we distinguish pre-processing from processing in the following manner: pre-processing means turning raw files (e.g. `.snirf`) into numpy arrays, and processing means stuff like bandpass filtering. We consider reconstruction a form of processing.
+Then you may want to do some processing. In this codebase we distinguish pre-processing from processing in the following manner: pre-processing means turning raw files (e.g. `.snirf`) into numpy arrays (see e.g. the `raw_channel_data.npz` in [Data Folder Structure](#data-folder-structure)), and processing means stuff like bandpass filtering. We consider reconstruction a form of processing.
 
 ```python
 config = [
@@ -65,22 +94,24 @@ experiment = processing_pipeline.apply(experiment)
 
 What `processing_pipeline.apply()` does is for each session, it loops through each processing step in the order they're listed, and applies that step's `.process()` method to the session's `processed_data` attribute. Each `ProcessingStep` has keyword arguments, these are specified as above for `ReconstructWithEigenmodes`.
 
+- [ ] We may want to re-architect steps or processing so that stuff can happen "live", and then we'd fold pre-processing into processing and write the code such that non-live data is treated as live.
 
 ## Notes on Project Architecture
-- We keep abstract classes in `/interfaces`, this is good for readability / future users of the code to easily find concepts.
+- We keep abstract classes in `/abstract_interfaces`, this is good for readability / future users of the code to easily find concepts.
 - We have many "domain objects", like a mesh, an optode, a session etc. These are kept in `/objects` for the same reason as above.
-- We want to treat this as a library, like our internal numpy, and then use the tool for our work. Not sure if this should be a separate repo, or just go in `/exa,ples`.
+- We want to treat this as a library, like our internal numpy, and then use the tool for our work.
+- Our work (outside building this library) should mostly happen inside `/research` and `steps.py`. 
+  - [ ] TBD if this is the best way, goal is to separate library from messy R&D code.
 
 ## Examples folder
 
-The `/examples` directory contains example scripts that demonstrate how to use the Lys library. This separation of concerns keeps the core library code (in `/objects`, `/visualization`, and `/utils`) stable and reusable, while allowing experimentation and result generation to happen in dedicated script files. The scripts include:
+This is a good place to start learning how the code works. The `/examples` directory contains example scripts that demonstrate how to use the library. The scripts include:
 
 - `processing_demo.py`: Demonstrates a complete experiment processing pipeline including wavelength conversion, hemoglobin reconstruction, scalp effect removal, t-statistics conversion, and eigenmode-based reconstruction with correlation analysis against MRI t-stats
 - `viz_demo.py`: Shows 3D visualization capabilities with meshes and optodes
 
 
 ## Visualization
-
 ### 3D plots
 
 The idea is to respect the Open-Closed principle + have composability. Whenever we define a new object that we want to be able to plot, it just needs to have a `to_vtk` method that returns a vtkActor and the `VTKScene` class can plot it. 
@@ -91,7 +122,7 @@ A few examples:
 from lys.objects.mesh import from_mat, StaticMeshData
 from lys.visualization.plot3d import VTKScene
 
-# Load a mesh from a MATLAB file
+# Load a mesh from a MATLAB file, could also do load_unMNI_mesh("P03")
 mesh = from_mat("/path/to/mesh.mat")
 
 # Create and show the visualization
@@ -103,7 +134,7 @@ scene.show(title="A New Title!")
 scene.remove(mesh)
 
 # If you want data on the mesh, e.g. t-stats
-data = np.random.rand(mesh.vertices.shape[0])) * 3 #these are between 0 and 3
+data = np.random.rand(mesh.vertices.shape[0])) * 3 #random numbers
 static_data_mesh = StaticMeshData(mesh, data) 
 scene.add(static_data_mesh) .show()
 ```
@@ -178,7 +209,7 @@ The system uses the **Strategy pattern** to automatically select the appropriate
 
 ```python
 from lys.processing.preprocessing import RawSessionPreProcessor
-from lys.objects.session import get_session_paths
+from lys.utils.paths import get_session_paths
 from pathlib import Path
 
 # Process a single session:
@@ -191,15 +222,28 @@ for path in paths:
     RawSessionPreProcessor.preprocess(path)
 ```
 
+
 **How It Works:**
 
 1. **Automatic Adapter Selection**: The `RawSessionPreProcessor` automatically detects the appropriate adapter by examining the files in the session directory
 2. **Device-Specific Processing**: Each adapter (like `BettinaSessionAdapter`) handles the specific file formats and data extraction for that device
 3. **Standardized Output**: All adapters produce `.npz` files with consistent naming (`raw_channel_data.npz`) for easy loading
 
+If you just want to check what a preprocessor does you could also do this:
+
+```
+    import os
+    from lys.utils.paths import lys_subjects_dir
+    
+    session_path = Path(os.path.join(lys_subjects_dir(), "P20/flow2/perceived_speech/session-1"))
+    processor = Flow2MomentsSessionAdapter()
+    data = processor.extract_data(session_path)
+```
+
 **Current Supported Devices:**
 
 - **Bettina Device**: Processes `.wl1` and `.wl2` files, extracting wavelength-specific data
+- **Flow2Moments**: processes `.snirf` files from the `MOMENTS` pipeline (not yet the `HB_MOMENTS` or others, but easy to extend when we want this.)
 
 **Extending for New Devices:**
 
@@ -220,26 +264,10 @@ class NewDeviceAdapter(ISessionAdapter):
 
 The system will automatically detect and use your new adapter when processing sessions that contain the appropriate files.
 
-## Data Directory Setup
-
-Before using Lys, you must set the `LYS_DATA_DIR` environment variable in your shell configuration (e.g., `.bashrc`, `.zshrc`). This variable should point to the root directory where your data is stored. For example:
-
-```bash
-LYS_DATA_DIR="/Users/thomasrialan/Documents/code/Geometric-Eigenmodes/data"
-export LYS_DATA_DIR
-```
-
-Make sure to restart your terminal or source your shell configuration after making this change:
-
-```bash
-source ~/.bashrc  # or source ~/.zshrc
-```
-
-This is cool because now we can call `lys.utils.paths.lys_data_dir()` and even if we have different computers it'll work for us all.
-
+## Some of our objects
 ### Patient Class
 
-The `Patient` class represents a subject with their associated brain segmentation and surface mesh. It is designed as an immutable (frozen) dataclass to ensure that once a `Patient` object is created, its attributes cannot be changed. This immutability helps prevent accidental modification of patient data, making the codebase safer and easier to reason about, especially when passing patient objects between functions or threads.
+The `Patient` class represents a subject: it has a name, a segmentation and a mesh. It is a frozen dataclass, i.e. immutable, which avoids potential errors down the line.
 
 **How to Instantiate a Patient**
 
@@ -372,32 +400,65 @@ The MATLAB file should contain:
 
 Each eigenmode is represented as an `Eigenmode` object, which is a subclass of `np.ndarray` with an additional `eigenvalue` attribute. This allows you to work with eigenmode values as regular numpy arrays while maintaining access to the associated eigenvalue.
 
-## Data Folder Structure
 
-Your data directory should be organized as follows:
+## Notes on recording perceived speech data
+
+We use [audible-cli](https://github.com/mkb79/audible-cli) to download audiobooks, and whisper to transcribe them with word-level timestamps. Claude estimates this to have ~20ms accuracy which is good enough for NIRS/EEG.
+
+Example download and conversion to `.mp3` of a book:
 
 ```
-subject/
-├── anat/
-│   ├── volumes/
-│   │   ├── MRI/
-│   │   └── segmentations/
-│   └── meshes/
-├── derivatives/
-│   └── jacobians/
-│       └── sub-001_jacobian.h5  # Actual file stored once
-└── nirs/
-    └── experiment/
-        ├── session1/
-        │   ├── (symlink) sub-001_jacobian.h5 -> ../../derivatives/jacobians/sub-001_jacobian.h5 
-        │   ├── sub-001_optodes.some_format
-        │   ├── data.snirf
-        │   ├── protocol.prt
-        │   └── processed_session1_v1
-        └── session2/
-            ├── (symlink) sub-001_jacobian.h5 -> ../../derivatives/jacobians/sub-001_jacobian.h5
-            ├── sub-001_optodes.some_format
-            ├── data.snirf
-            └── protocol.prt
+audible library list
+audible download --asin 0141987162 --output-dir ./audiobooks/ --aax
+audible activation-bytes #this gives some number, here "7935c812"
+ffmpeg -activation_bytes 7935c812 -i "./audiobooks/Churchill_Walking_with_Destiny-LC_64_22050_stereo.aax" -c:a libmp3lame "./audiobooks/churchill.mp3" #converts .aax file to .mp3
 ```
+
+Then this book needs to be transcribed so that each word is timestamped. We do this with [whisper.cpp](https://github.com/ggml-org/whisper.cpp) for performance.
+
+To generate a transcript, clone and make the `whisper.cpp` repo, download a model (`large-v3-turbo` is good, smaller models seem quite bad) like this:
+
+```bash
+bash ./models/download-ggml-model.sh large-v3-turbo
+```
+
+ and run this command: 
+
+```bash
+MODEL_PATH="/Users/thomasrialan/Documents/code/whisper.cpp/models/ggml-large-v3-turbo.bin"
+WHISPER_BIN="/Users/thomasrialan/Documents/code/whisper.cpp/build/bin/whisper-cli"
+"$WHISPER_BIN" -m "$MODEL_PATH" -f <file path here!> -oj -ml 1
+```
+
+`-ml 1` is max-length argument, meaning we want timestamps for each word, `-oj` means we want `.json` output.
+
+To convert `.mp3` to 16k mono `.wav`:
+
+```bash
+ffmpeg -i file.mp3 -ar 16000 -ac 1 file_16k_mono.wav
+```
+
+(I'm not certain this is necessary). Then we might want to split the audio into chunks of 15 minutes, which make for short (and hence more focused?) recordings.
+
+### Flow2
+Currently we have to manually start and stop the Flow2 recording, however pre-processing takes care of aligning timestamps. Our `TaskExecutor` uses the [Kernel Tasks SDK](https://docs.kernel.com/docs/kernel-tasks-sdk) to send an event to the `.snirf` when we press "play" on the GUI. 
+
+You can run `examples/task_demo.py`, for this to work you need at least some audio files. These must be stored alongside their timestamped transcripts, see screenshot below. See the section above for how to generate these with whisper.cpp.
+
+
+<p align="center">
+  <img src="assets/audio_assets.png" alt="Audio assets folder structure" width="600"/>
+</p>
+
+
+
+Current steps:
+1. Do the steps on the Kernel portal to get the recording started (tune the lasers, etc...),
+2. Run `data_recording/perceived_speech.py`, pick a recording and press play
+3. Either wait for the audio recording to end, or press stop,
+4. Stop the recording on the Kernel portal,
+5. Wait a few mins for uploading to Kernel Cloud [this steps needs to be removed w/offline mode]
+6. Run the Moments pipeline
+7. Put the resulting .snirf file in the session folder (also done manually, sigh)
+8. Run pre-processing
 

@@ -2,6 +2,9 @@ import os
 import numpy as np
 from PIL import Image, ImageChops
 import pytest
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+from data_recording.perceived_speech import validate_audio_transcript_folder
 
 #: Directory where test image snapshots are stored.
 SNAPSHOT_DIR = os.path.join(os.path.dirname(__file__), "snapshots")
@@ -35,3 +38,34 @@ def clean_failed_snapshots():
                 os.remove(file_path)
     else:
         os.makedirs(FAILED_SNAPSHOT_DIR, exist_ok=True) 
+
+def test_validate_audio_transcript_folder(tmp_path):
+    # Case 1: valid folder
+    wav = tmp_path / "audio.wav"
+    jsonf = tmp_path / "transcript.json"
+    wav.write_bytes(b"fake wav")
+    jsonf.write_text("{}")
+    result = validate_audio_transcript_folder(tmp_path)
+    assert result is not None
+    assert result[0].name == "audio.wav"
+    assert result[1].name == "transcript.json"
+
+    # Case 2: missing .json
+    wav2 = tmp_path / "audio2.wav"
+    wav2.write_bytes(b"fake wav")
+    result = validate_audio_transcript_folder(tmp_path)
+    assert result is None
+
+    # Case 3: extra .json
+    json2 = tmp_path / "extra.json"
+    json2.write_text("{}")
+    result = validate_audio_transcript_folder(tmp_path)
+    assert result is None
+
+    # Case 4: no .wav
+    for f in tmp_path.iterdir():
+        f.unlink()
+    jsonf = tmp_path / "transcript.json"
+    jsonf.write_text("{}")
+    result = validate_audio_transcript_folder(tmp_path)
+    assert result is None 

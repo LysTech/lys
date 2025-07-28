@@ -2,7 +2,7 @@ import numpy as np
 from scipy.io import loadmat
 from typing import List
 
-from lys.utils.paths import lys_data_dir
+from lys.utils.paths import lys_subjects_dir
 
 #TODO: think about whether it should really be a subclass of np.ndarray,
 # np.array( of a list of Eigenmode objects) will not allow arr[0].eigenvalue...
@@ -45,7 +45,7 @@ def load_eigenmodes(patient: str) -> List[Eigenmode]:
     Returns:
         List of Eigenmode objects, each containing values and eigenvalue
     """
-    path = lys_data_dir() / patient / "anat" / "meshes" / f"{patient}_EIGMOD_MPR_IIHC_MNI_WM_LH_edited_again_RECOSM_unMNI_D32k_eigenmodes.mat"
+    path = lys_subjects_dir() / patient / "anat" / "meshes" / f"{patient}_EIGMOD_MPR_IIHC_MNI_WM_LH_edited_again_RECOSM_unMNI_D32k_eigenmodes.mat"
     mdata = loadmat(path)
     eigenmodes_array = mdata["eigenmodes"]
     eigenvals = mdata["eigenvalues"][0]
