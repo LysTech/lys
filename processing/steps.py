@@ -7,7 +7,7 @@ from scipy.stats import gamma
 from lys.objects import Session
 from lys.interfaces.processing_step import ProcessingStep
 
-fs = 3.4722  
+fs = 3.4722
 DPF = 6.0
 source_detector_distance = 3.0
 extHbO_wl1 = 586
@@ -37,6 +37,89 @@ def canonical_double_gamma_hrf(tr=1.0, duration=30.0):
 import numpy as np
 from typing import Dict, List, Tuple
 from lys.interfaces.processing_step import ProcessingStep
+import matplotlib.pyplot as plt
+from typing import Sequence, Union
+
+def plot_hrf(session,
+             tasks:      Union[None, str, Sequence[str]] = None,
+             channels:   Union[str, int, Sequence[int]] = "mean",
+             colors:     tuple[str, str] = ("C0", "C3"),  # HbO, HbR
+             outfile:    str = "hrf.png"):
+    """
+    Grand‑average HRF (HbO & HbR) for a lys *Session*.
+
+    Parameters
+    ----------
+    tasks   : • None  – all tasks are pooled and averaged
+              • str   – *one* task name (plot this task only)
+              • list/tuple[str] – explicit set of tasks to average
+    channels: • "mean" – average across all *good* channels
+              • int    – *one* channel index (plots that channel only)
+              • list/tuple[int] – average across this set of indices
+    colors  : pair of matplotlib colours (HbO, HbR)
+    outfile : target path for the PNG
+
+    Notes
+    -----
+    *Bad* channels (as detected by `DetectBadChannels`) are always ignored.
+    A ±1 SD ribbon is drawn when more than one channel is averaged.
+    """
+    hrf   = session.processed_data["hrf"]
+    t     = hrf["time"]                                # (L,)
+
+    # -------- task selection -------------------------------------------
+    if tasks is None:                    # all tasks
+        sel_tasks = list(hrf["HbO"].keys())
+    elif isinstance(tasks, str):         # single task
+        if tasks not in hrf["HbO"]:
+            raise ValueError(f"Task '{tasks}' not found in HRF data.")
+        sel_tasks = [tasks]
+    else:                                # explicit list/tuple
+        sel_tasks = list(tasks)
+        missing   = set(sel_tasks) - set(hrf["HbO"])
+        if missing:
+            raise ValueError(f"Unknown task(s): {', '.join(missing)}")
+
+    # -------- good / bad channel bookkeeping ---------------------------
+    bad   = np.asarray(session.processed_data.get("bad_channels", []), int)
+    C_tot = next(iter(hrf["HbO"].values())).shape[1]
+    good  = np.setdiff1d(np.arange(C_tot), bad, assume_unique=True)
+
+    # -------- channel selection ----------------------------------------
+    if channels == "mean":
+        sel_ch = good
+    elif isinstance(channels, int):
+        if channels in bad:
+            raise ValueError(f"Channel {channels} was flagged bad.")
+        sel_ch = np.asarray([channels])
+    else:
+        sel_ch = np.setdiff1d(np.asarray(channels, int), bad, assume_unique=True)
+        if sel_ch.size == 0:
+            raise ValueError("All requested channels are bad.")
+
+    # -------------------------------------------------------------------
+    plt.figure(figsize=(6, 3))
+
+    for key, col in zip(("HbO", "HbR"), colors):
+        mats = np.stack([hrf[key][task] for task in sel_tasks], axis=0)  # (T, L, C)
+        grand = mats.mean(axis=0)             # (L, C) average over tasks
+        sel   = grand[:, sel_ch]              # (L, K)
+        mu    = sel.mean(axis=1)
+        sd    = sel.std(axis=1, ddof=0)
+
+        plt.plot(t, mu, color=col, label=key)
+        if sel_ch.size > 1:
+            plt.fill_between(t, mu - sd, mu + sd, color=col, alpha=0.4, linewidth=0)
+
+    # -------- cosmetics -------------------------------------------------
+    plt.axvline(0, lw=.6, color="k")
+    plt.xlabel("Time [s]")
+    plt.ylabel("ΔµM (baseline‑zeroed)")
+    plt.title("Session‑averaged HRF (μ ± σ)")
+    plt.legend(frameon=False, fontsize=8)
+    plt.tight_layout()
+    plt.savefig(outfile)
+    plt.close()
 
 class ExtractHRF(ProcessingStep):
     """
