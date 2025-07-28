@@ -414,7 +414,7 @@ audible activation-bytes #this gives some number, here "7935c812"
 ffmpeg -activation_bytes 7935c812 -i "./audiobooks/Churchill_Walking_with_Destiny-LC_64_22050_stereo.aax" -c:a libmp3lame "./audiobooks/churchill.mp3" #converts .aax file to .mp3
 ```
 
-Then this book needs to be transcribed so that each word is timestamped. We do this with [whisper.cpp](https://github.com/ggml-org/whisper.cpp) for performance. [#TODO: provide a script of how to do this].
+Then this book needs to be transcribed so that each word is timestamped. We do this with [whisper.cpp](https://github.com/ggml-org/whisper.cpp) for performance.
 
 To generate a transcript, clone and make the `whisper.cpp` repo, download a model (`large-v3-turbo` is good, smaller models seem quite bad) like this:
 
@@ -438,16 +438,20 @@ To convert `.mp3` to 16k mono `.wav`:
 ffmpeg -i file.mp3 -ar 16000 -ac 1 file_16k_mono.wav
 ```
 
-(I'm not certain this is necessary).
+(I'm not certain this is necessary). Then we might want to split the audio into chunks of 15 minutes, which make for short (and hence more focused?) recordings.
 
 ### Flow2
-Currently we have to manually start and stop the Flow2 recording, however pre-processing takes care of aligning timestamps. So you can run `examples/task_demo.py`.
+Currently we have to manually start and stop the Flow2 recording, however pre-processing takes care of aligning timestamps. Our `TaskExecutor` uses the [Kernel Tasks SDK](https://docs.kernel.com/docs/kernel-tasks-sdk) to send an event to the `.snirf` when we press "play" on the GUI. 
+
+You can run `examples/task_demo.py`, for this to work you need at least some audio files. These must be stored alongside their timestamped transcripts. See the section above for how to generate these with whisper.cpp.
 
 Current steps:
-1. Do the steps to get the recording started,
-2. Stop the recording
-3. Wait a few mins for uploading to Kernel Cloud [this steps needs to be removed w/offline mode]
-4. Run the Moments pipeline
-5. Put the resulting .snirf file in the session folder (also done manually, sigh)
-6. Run pre-processing
+1. Do the steps on the Kernel portal to get the recording started (tune the lasers, etc...),
+2. Run `data_recording/perceived_speech.py`, pick a recording and press play
+3. Either wait for the audio recording to end, or press stop,
+4. Stop the recording on the Kernel portal,
+5. Wait a few mins for uploading to Kernel Cloud [this steps needs to be removed w/offline mode]
+6. Run the Moments pipeline
+7. Put the resulting .snirf file in the session folder (also done manually, sigh)
+8. Run pre-processing
 
