@@ -575,7 +575,7 @@ if __name__ == "__main__":
     from lys.abstract_interfaces.task import Task
     from lys.data_recording.flow2_device_manager import Flow2DeviceManager
     
-    subject = "thomas"
+    subject = "P20"
     experiment_name = "perceived_speech"
     device = "flow2"
 
@@ -585,3 +585,4 @@ if __name__ == "__main__":
     
     session_path = task.make_new_session(subject, experiment_name, device)
     task.start(session_path)
+    
