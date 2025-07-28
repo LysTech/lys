@@ -2,21 +2,9 @@
 
 Breaking change in latest merge: now the data structure shouldn't be data/P03, but data/subjects/P03.
 
-TODO:
-- most important one is to sit down with Anthony and/or Nyx and get input on this / maybe we can re-diagram things and have a second think now that lots of stuff is implemented -> there'll probably be some good refactors to do. I think the code is sufficiently modular that this shouldn't be too hard (??)
-- (lots of #TODO tags throughout the code, grep for them and fix)
-- I've not implemented Tasks and stuff related to recording new data, this is the next big thing after code review
-
-## Data Folder Structure
-
-<p align="center">
-  <img src="assets/data_structure.png" alt="Data folder structure diagram" width="600"/>
-</p>
-
 ## Table of Contents
 
 - [Data Folder Structure](#data-folder-structure)
-
 - [Demo Usage](#demo-usage)
   - [Processing Demo](#processing-demo)
 - [Visualization](#visualization)
@@ -27,6 +15,15 @@ TODO:
 - [Jacobian](#jacobian)
 - [Eigenmodes](#eigenmodes)
 - [Data Directory Setup](#data-directory-setup)
+
+TODO:
+- (lots of #TODO tags throughout the code, grep for them and fix)
+
+## Data Folder Structure
+
+<p align="center">
+  <img src="assets/data_structure.png" alt="Data folder structure diagram" width="600"/>
+</p>
 
 ## Demo Usage
 
