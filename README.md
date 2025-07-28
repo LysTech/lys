@@ -443,7 +443,14 @@ ffmpeg -i file.mp3 -ar 16000 -ac 1 file_16k_mono.wav
 ### Flow2
 Currently we have to manually start and stop the Flow2 recording, however pre-processing takes care of aligning timestamps. Our `TaskExecutor` uses the [Kernel Tasks SDK](https://docs.kernel.com/docs/kernel-tasks-sdk) to send an event to the `.snirf` when we press "play" on the GUI. 
 
-You can run `examples/task_demo.py`, for this to work you need at least some audio files. These must be stored alongside their timestamped transcripts. See the section above for how to generate these with whisper.cpp.
+You can run `examples/task_demo.py`, for this to work you need at least some audio files. These must be stored alongside their timestamped transcripts, see screenshot below. See the section above for how to generate these with whisper.cpp.
+
+
+<p align="center">
+  <img src="assets/audio_assets.png" alt="Audio assets folder structure" width="600"/>
+</p>
+
+
 
 Current steps:
 1. Do the steps on the Kernel portal to get the recording started (tune the lasers, etc...),
