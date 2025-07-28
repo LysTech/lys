@@ -25,7 +25,7 @@ num_detectors = 24
 
 def canonical_double_gamma_hrf(tr=1.0, duration=30.0):
     times = np.arange(0, duration, tr)
-    peak1, peak2 = 4, 14
+    peak1, peak2 = 4, 10
     ratio = 1/6
 
     hrf1 = gamma.pdf(times, peak1)
@@ -33,10 +33,92 @@ def canonical_double_gamma_hrf(tr=1.0, duration=30.0):
     hrf = hrf1 - ratio * hrf2
     return hrf
 
+# ─── extract_hrf.py ──────────────────────────────────────────────────────────
+import numpy as np
+from typing import Dict, List, Tuple
+from lys.interfaces.processing_step import ProcessingStep
+
+class ExtractHRF(ProcessingStep):
+    """
+    Event‑locked, baseline‑corrected HRF extraction.
+
+    Adds:
+        session.processed_data["hrf"] = {
+            "time" : 1‑D array,                 # seconds relative to onset
+            "HbO"  : {cond: (L, C) ndarray},    # L = n_lags, C = n_channels
+            "HbR"  : {cond: (L, C) ndarray},
+        }
+    """
+
+    def __init__(self,
+                 tmin: float = -5.0,          # s before onset  (baseline window starts here)
+                 tmax: float = 30.0,          # s after onset   (end of HRF window)
+                 baseline: Tuple[float,float] = (-5.0, 0.0)  # s w.r.t onset
+                 ):
+        self.tmin, self.tmax = tmin, tmax
+        self.baseline        = baseline
+
+    # ------------------------------------------------------------------
+    # main entry
+    # ------------------------------------------------------------------
+    def _do_process(self, session: "Session") -> None:
+        HbO = session.processed_data["HbO"]      # (T, C)
+        HbR = session.processed_data["HbR"]
+        fs  = globals().get("fs", 3.4722)        # Hz; already defined above
+        C   = HbO.shape[1]                       # S·D channels
+
+        # time axis for the extracted HRF
+        L         = int(round((self.tmax - self.tmin) * fs))          # samples per epoch
+        time_axis = np.arange(L) / fs + self.tmin                     # seconds
+
+        hrf_HbO: Dict[str,np.ndarray] = {}
+        hrf_HbR: Dict[str,np.ndarray] = {}
+
+        for cond in session.protocol.tasks:
+            # ---- collect onset indices ---------------------------------
+            onsets = [start for start, _, label in session.protocol.intervals
+                      if label == cond]
+            segments_O: List[np.ndarray] = []
+            segments_R: List[np.ndarray] = []
+
+            for t0 in onsets:
+                start = int(round((t0 + self.tmin) * fs))
+                end   = start + L
+                if start < 0 or end > HbO.shape[0]:        # skip truncated epochs
+                    continue
+
+                seg_O = HbO[start:end, :].copy()           # (L, C)
+                seg_R = HbR[start:end, :].copy()
+
+                # ---- baseline‑correct each trial -----------------------
+                b0 = int(round((t0 + self.baseline[0]) * fs))
+                b1 = int(round((t0 + self.baseline[1]) * fs))
+                if b0 >= 0 and b1 > b0:
+                    base_O = HbO[b0:b1, :].mean(axis=0)
+                    base_R = HbR[b0:b1, :].mean(axis=0)
+                    seg_O -= base_O
+                    seg_R -= base_R
+
+                segments_O.append(seg_O)
+                segments_R.append(seg_R)
+
+            # ---- grand‑average over trials -----------------------------
+            if segments_O:                       # at least one good epoch
+                hrf_HbO[cond] = np.mean(np.stack(segments_O, axis=0), axis=0)
+                hrf_HbR[cond] = np.mean(np.stack(segments_R, axis=0), axis=0)
+
+        # stash results
+        session.processed_data["hrf"] = {
+            "time": time_axis,          # (L,)
+            "HbO":  hrf_HbO,
+            "HbR":  hrf_HbR,
+        }
+
+
 def detect_bad_channels(raw_wl1: np.ndarray,
                         raw_wl2: np.ndarray,
                         cv_high_thresh: float = 0.50,
-                        cv_low_thresh: float  = 0.005
+                        cv_low_thresh: float  = 0.0001
                         ) -> list[int]:
     """
     Identify bad source–detector channels based on coefficient of variation
@@ -1623,7 +1705,7 @@ class ConvertToTStats(ProcessingStep):
                 if start_idx < end_idx:
                     X[start_idx:end_idx, i] = 1.0
         tr = 1.0 / fs
-        hrf = canonical_double_gamma_hrf(tr=tr, duration=30.0)  # or your choice
+        hrf = canonical_double_gamma_hrf(tr=tr)  # or your choice
         for col_idx in range(n_conditions):
             # convolve
             col_convolved = convolve(X[:, col_idx], hrf, mode='full')[:n_time_points]
@@ -1982,7 +2064,7 @@ class BandpassFilter(ProcessingStep):
             Filtered data array
         """
         # Design the Butterworth filter
-        nyquist = 0.5  # Assuming normalized frequency
+        nyquist = 0.5 * fs # Assuming normalized frequency
         low = self.lower_bound / nyquist
         high = self.upper_bound / nyquist
         
