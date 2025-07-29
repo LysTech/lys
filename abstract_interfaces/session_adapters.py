@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 import numpy as np
 
+#TODO: not sure SessionAdapter is the best name, maybe SessionPreprocessor?
 
 class ISessionAdapter(ABC):
     """ Preprocessing: turning raw files of fucked format into useful .npz files that can be loaded (for processing!)

@@ -1,9 +1,12 @@
 from lys.objects import Experiment
-from lys.processing.steps import ProcessingStep, BandpassFilter
+from lys.processing.steps import ProcessingStep
 import importlib
 import inspect
 from tqdm import tqdm
 from typing import List, Dict, Any
+import numpy as np
+from lys.ml.preparer import MLDataPreparer
+
 
 class ProcessingPipeline:
     """
@@ -11,6 +14,8 @@ class ProcessingPipeline:
     
     The pipeline is configured from a list that specifies which processing
     steps to apply and their parameters in order.
+
+    The MLDataPreparer is the last step in any pipeline: it takes what came out of the pipeline and prepares it for turning into a dataset.
     """
     
     def __init__(self, config: List[Dict[str, Any]]):
@@ -37,6 +42,7 @@ class ProcessingPipeline:
             ]
         """
         self.steps = []
+        self.ml_data_preparer = MLDataPreparer()
         
         if config is not None:
             self._configure_from_list(config)
@@ -51,6 +57,8 @@ class ProcessingPipeline:
         for session in tqdm(experiment.sessions, desc="Processing sessions"):
             for step in self.steps:
                 step.process(session)
+            
+            self.ml_data_preparer.prepare(session)
         return experiment
 
     def _configure_from_list(self, config: List[Dict[str, Any]]) -> None:

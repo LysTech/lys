@@ -4,6 +4,7 @@ import numpy as np
 from lys.processing.pipeline import ProcessingPipeline
 from lys.processing.steps import BandpassFilter
 from lys.objects import Experiment, Session, Patient, Protocol
+from lys.ml.preparer import MLDataPreparer
 
 
 class TestProcessingPipeline:
@@ -63,6 +64,49 @@ class TestProcessingPipeline:
         with pytest.raises(ValueError):
             pipeline._get_processing_step_class("ProcessingStep")
     
+    @patch('lys.processing.pipeline.MLDataPreparer')
+    def test_apply_calls_ml_preparer(self, mock_preparer_class):
+        """Test that apply() calls the MLDataPreparer."""
+        mock_preparer_instance = mock_preparer_class.return_value
+        
+        # Create a minimal experiment
+        raw_data = {"wl1": np.random.randn(10, 2), "wl2": np.random.randn(10, 2)}
+        patient = Patient(name="P01", segmentation=Mock(), mesh=Mock())
+        protocol = Protocol(intervals=[])
+        session = Session(patient=patient, protocol=protocol, raw_data=raw_data)
+        experiment = Experiment(name="test", scanner="nirs", sessions=[session])
+        
+        pipeline = ProcessingPipeline(config=[])
+        pipeline.apply(experiment)
+        
+        mock_preparer_instance.prepare.assert_called_once_with(session)
+
+    def test_pipeline_creates_data_for_ml_key(self):
+        """Test that the pipeline correctly creates the data_for_ml key."""
+        # Create a simple session with some data that can be prepared
+        raw_data = {
+            "wl1": np.array([[1, 2], [3, 4]]),
+            "wl2": np.array([[5, 6], [7, 8]])
+        }
+        patient = Patient(name="P01", segmentation=Mock(), mesh=Mock())
+        protocol = Protocol(intervals=[])
+        session = Session(patient=patient, protocol=protocol, raw_data=raw_data)
+        
+        # The session's processed_data will initially be a copy of raw_data
+        session.processed_data = session.raw_data.copy()
+
+        experiment = Experiment(name="test", scanner="nirs", sessions=[session])
+        
+        # Create a pipeline with no processing steps, so only the preparer runs
+        pipeline = ProcessingPipeline(config=[])
+        pipeline.apply(experiment)
+        
+        assert "data_for_ml" in session.processed_data
+        assert session.processed_data["data_for_ml"].shape == (2, 2, 2)
+        
+        expected_data = np.stack([raw_data["wl1"], raw_data["wl2"]], axis=-1)
+        np.testing.assert_array_equal(session.processed_data["data_for_ml"], expected_data)
+
     def test_apply_processes_sessions_with_bandpass_filter(self):
         """Test that apply() correctly processes sessions and calls BandpassFilter.process."""
         # Create simple test data

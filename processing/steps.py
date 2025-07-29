@@ -36,7 +36,6 @@ def canonical_double_gamma_hrf(tr=1.0, duration=30.0):
 # ─── extract_hrf.py ──────────────────────────────────────────────────────────
 import numpy as np
 from typing import Dict, List, Tuple
-from lys.interfaces.processing_step import ProcessingStep
 import matplotlib.pyplot as plt
 from typing import Sequence, Union
 
@@ -1274,7 +1273,6 @@ class ReconstructDual(ProcessingStep):
 
 import numpy as np
 from typing import List, Tuple
-from lys.interfaces.processing_step import ProcessingStep
 
 class ReconstructDualWithoutBadChannels(ProcessingStep):
     """
