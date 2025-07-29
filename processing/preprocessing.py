@@ -98,7 +98,7 @@ class Flow2MomentsSessionAdapter(ISessionAdapter):
         - 'channels': list of (source, detector) tuples
         - 'wavelengths': list of wavelength indices
         - 'moment_names': ['amplitude', 'mean_time_of_flight', 'variance']
-        - 'time': time vector (n_timepoints,) of absolute unix timestamps
+        - 'time': time vector (n_timepoints,) in seconds, relative to the NIRS stream's 'start_experiment' event.
         """
         snirf_path = next(session_path.glob('*_MOMENTS.snirf'))
         snirf_data = snirf.Snirf(str(snirf_path), 'r')
@@ -121,12 +121,14 @@ class Flow2MomentsSessionAdapter(ISessionAdapter):
             data, absolute_time_vector, session_path
         )
 
+        relative_time_vector = absolute_time_vector - start_timestamp
+
         return {
             'data': data,
             'channels': channel_wavelength_maps['channel_tuples'],
             'wavelengths': channel_wavelength_maps['wavelength_indices'],
             'moment_names': moment_names,
-            'time': absolute_time_vector,
+            'time': relative_time_vector,
         }
 
     def _get_nirs_start_timestamp(self, snirf_data: snirf.Snirf) -> float:

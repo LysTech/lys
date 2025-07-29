@@ -1,18 +1,32 @@
 from abc import ABC, abstractmethod
-from typing import Tuple
-import numpy as np
-from lys.ml.dataset import SessionDatasetCollection
+from typing import List
+from dataclasses import dataclass
+
+from lys.ml.dataset import MLDataset
+
+
+@dataclass
+class TrainValTestSplit:
+    """A container for train, validation, and test datasets."""
+    train: MLDataset
+    val: MLDataset
+    test: MLDataset
 
 
 class DatasetSplitter(ABC):
-    """Abstract base class for different strategies to split datasets for training/testing."""
-    
+    """
+    Abstract base class for dataset splitting strategies.
+    """
     @abstractmethod
-    def split(self, dataset_collection: SessionDatasetCollection) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def split(self, datasets: List[MLDataset]) -> TrainValTestSplit:
         """
-        Split a collection of session datasets into train/test sets.
-        
+        Splits a list of datasets into training, validation and testing sets.
+
+        Args:
+            datasets (List[MLDataset]): The datasets to split.
+
         Returns:
-            Tuple of (X_train, y_train, X_test, y_test)
+            TrainValTestSplit: An object containing the
+            training, validation, and testing datasets.
         """
         pass
