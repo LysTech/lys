@@ -2,9 +2,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 import numpy as np
 
-#TODO: not sure SessionAdapter is the best name, maybe SessionPreprocessor?
 
-class ISessionAdapter(ABC):
+class ISessionPreprocessor(ABC):
     """ Preprocessing: turning raw files of fucked format into useful .npz files that can be loaded (for processing!)
         We distinguish this from processing, which does stuff like bandpass filtering, etc.
 
@@ -21,7 +20,8 @@ class ISessionAdapter(ABC):
     @abstractmethod
     def extract_data(self, session_path: Path) -> dict:
         """Extract data from device-specific formats and return as a dictionary.
-        The dictionary keys will become the npz file keys."""
+        The dictionary keys will become the npz file keys. The dictionary must
+        contain a 'time' key with a numpy array of timestamps."""
         raise NotImplementedError
     
     def process(self, session_path: Path):
@@ -30,6 +30,7 @@ class ISessionAdapter(ABC):
         Subclasses must implement extract_data() but cannot override this method.
         """
         data = self.extract_data(session_path)
+        assert 'time' in data, "Contract violation: extract_data() must return a dict with a 'time' key."
         output_path = session_path / 'raw_channel_data.npz'
         np.savez(output_path, **data)
 

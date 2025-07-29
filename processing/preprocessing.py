@@ -1,8 +1,9 @@
 from pathlib import Path
 import numpy as np
 import snirf
+import warnings
 
-from lys.abstract_interfaces import ISessionAdapter
+from lys.abstract_interfaces.session_preprocessor import ISessionPreprocessor
 
 """ 
 Preprocessing: turning raw files of fucked format into useful .npz files that can be loaded (for processing!)
@@ -25,7 +26,7 @@ for path in paths:
     RawSessionPreProcessor.preprocess(path)
 """
 
-#TODO: currently we don't do optodes stuff for BettinaSessionAdapter
+#TODO: currently we don't do optodes stuff for BettinaSessionPreprocessor
 #TODO: generally figure out the optodes thing, see comment in Notion Architecture page
 
 class RawSessionPreProcessor:
@@ -39,14 +40,14 @@ class RawSessionPreProcessor:
         processor = cls(session_path)
         return processor.session_adapter.process(processor.session_path)
     
-    def _select_strategy(self) -> 'ISessionAdapter':
+    def _select_strategy(self) -> 'ISessionPreprocessor':
         """
         Select the appropriate strategy (adapter) based on session content.
         Uses the Strategy pattern to choose the best adapter for the job.
         """
         available_strategies = [
-            BettinaSessionAdapter(),
-            Flow2MomentsSessionAdapter(),
+            BettinaSessionPreprocessor(),
+            Flow2MomentsSessionPreprocessor(),
             # Add more adapters here as they're implemented
         ]
         
@@ -57,7 +58,7 @@ class RawSessionPreProcessor:
         raise ValueError(f"No suitable adapter found for session at {self.session_path}")
 
 
-class BettinaSessionAdapter(ISessionAdapter):
+class BettinaSessionPreprocessor(ISessionPreprocessor):
     def can_handle(self, session_path: Path) -> bool:
         """Check if this session contains the required .w;1 and .wl2 files for Bettina processing."""
         assert session_path.is_dir()
@@ -73,10 +74,22 @@ class BettinaSessionAdapter(ISessionAdapter):
         wl2_path = next(session_path.glob('*.wl2'))
         wl1 = np.loadtxt(wl1_path)
         wl2 = np.loadtxt(wl2_path)
-        return {'wl1': wl1, 'wl2': wl2}
+
+        fs = 3.4722
+        warnings.warn(
+            f"Using a hardcoded sampling frequency ({fs} Hz) for {session_path}. "
+            "Different sessions or devices may have slightly different sampling frequencies. "
+            "A more robust solution would be to extract this from metadata if available.",
+            UserWarning
+        )
+        
+        n_timepoints = wl1.shape[0]
+        time_vector = np.arange(n_timepoints) / fs
+        
+        return {'wl1': wl1, 'wl2': wl2, 'time': time_vector}
 
 
-class Flow2MomentsSessionAdapter(ISessionAdapter):
+class Flow2MomentsSessionPreprocessor(ISessionPreprocessor):
     """
     Adapter for Kernel Flow2 .snirf files from the 'Moments' pipeline.
 
@@ -382,7 +395,7 @@ if __name__=="__main__":
     
     session_path = Path(os.path.join(lys_subjects_dir(), "P20/flow2/perceived_speech/session-1"))
     
-    processor = Flow2MomentsSessionAdapter()
+    processor = Flow2MomentsSessionPreprocessor()
     data = processor.extract_data(session_path)
-    #RawSessionPreProcessor.preprocess(session_path)
+    RawSessionPreProcessor.preprocess(session_path)
     

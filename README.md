@@ -1,7 +1,5 @@
 # Lys
 
-Breaking change in latest merge: now the data structure shouldn't be data/P03, but data/subjects/P03.
-
 ## Table of Contents
 
 - [Data Folder Structure](#data-folder-structure)
