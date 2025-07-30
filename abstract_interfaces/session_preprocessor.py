@@ -21,7 +21,8 @@ class ISessionPreprocessor(ABC):
     def extract_data(self, session_path: Path) -> dict:
         """Extract data from device-specific formats and return as a dictionary.
         The dictionary keys will become the npz file keys. The dictionary must
-        contain a 'time' key with a numpy array of timestamps."""
+        contain both a 'time' key with a numpy array of timestamps and a 'data'
+        key with the main signal data."""
         raise NotImplementedError
     
     def process(self, session_path: Path):

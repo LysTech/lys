@@ -80,6 +80,7 @@ def get_session_paths(experiment_name, scanner_name):
     Each subject is a subfolder in lys_subjects_dir() starting with 'P' followed by a number.
     Within each subject, looks for scanner_name/experiment_name/session* folders.
     Only folders matching 'session' in their name are included.
+    Raises FileNotFoundError if no sessions are found for the given experiment/scanner combination.
     """
     data_root = lys_subjects_dir()
     session_paths = []
@@ -90,6 +91,10 @@ def get_session_paths(experiment_name, scanner_name):
                 for session_dir in experiment_dir.iterdir():
                     if session_dir.is_dir() and session_dir.name.lower().startswith('session'):
                         session_paths.append(session_dir)
+    
+    if not session_paths:
+        raise FileNotFoundError(f"No sessions found for experiment '{experiment_name}' with scanner '{scanner_name}'")
+    
     return session_paths
 
 

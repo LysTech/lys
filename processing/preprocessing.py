@@ -3,6 +3,7 @@ import numpy as np
 import snirf
 import warnings
 
+from lys.utils.paths import get_session_paths
 from lys.abstract_interfaces.session_preprocessor import ISessionPreprocessor
 
 """ 
@@ -86,7 +87,8 @@ class BettinaSessionPreprocessor(ISessionPreprocessor):
         n_timepoints = wl1.shape[0]
         time_vector = np.arange(n_timepoints) / fs
         
-        return {'wl1': wl1, 'wl2': wl2, 'time': time_vector}
+        return {'wl1': wl1, 'wl2': wl2, 
+                'time': time_vector}
 
 
 class Flow2MomentsSessionPreprocessor(ISessionPreprocessor):
@@ -387,6 +389,59 @@ class Flow2MomentsSessionPreprocessor(ISessionPreprocessor):
         alignment_index = np.argmin(np.abs(nirs_time_vector - protocol_start_time))
         
         return int(alignment_index)
+
+
+def preprocess_experiment(experiment_name: str, scanner_name: str) -> None:
+    """
+    Preprocess all sessions for a given experiment and scanner combination.
+    
+    This function finds all session folders for the specified experiment/scanner pair
+    and processes each one using the appropriate session preprocessor. The resulting
+    data is saved as 'raw_channel_data.npz' in each session folder.
+    
+    If any existing raw_channel_data.npz files are found, the user will be prompted
+    once to confirm overwriting all of them.
+    
+    Args:
+        experiment_name: Name of the experiment (e.g., 'perceived_speech')
+        scanner_name: Name of the scanner/device (e.g., 'flow2', 'bettina')
+        
+    Raises:
+        FileNotFoundError: If no sessions are found for the given experiment/scanner combination
+        ValueError: If no suitable preprocessor adapter is found for a session
+        SystemExit: If user chooses not to overwrite existing files
+    """
+    
+    session_paths = get_session_paths(experiment_name, scanner_name)
+    
+    print(f"Found {len(session_paths)} sessions for experiment '{experiment_name}' with scanner '{scanner_name}'")
+    
+    # Check for existing raw_channel_data.npz files
+    existing_files = []
+    for session_path in session_paths:
+        npz_file = session_path / 'raw_channel_data.npz'
+        if npz_file.exists():
+            existing_files.append(npz_file)
+    
+    if existing_files:
+        print(f"\n⚠️  Found {len(existing_files)} existing raw_channel_data.npz files:")
+        for file_path in existing_files:
+            print(f"  - {file_path}")
+        
+        response = input("\nOverwrite all existing files? (y/N): ").strip().lower()
+        if response != 'y':
+            print("❌ Preprocessing cancelled by user.")
+            return
+        print()
+    
+    for session_path in session_paths:
+        try:
+            print(f"Processing session: {session_path}")
+            RawSessionPreProcessor.preprocess(session_path)
+            print(f"✅ Successfully processed: {session_path}")
+        except Exception as e:
+            print(f"❌ Failed to process {session_path}: {e}")
+            raise
 
 
 if __name__=="__main__":

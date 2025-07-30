@@ -19,7 +19,7 @@ class MLDataPreparer:
                           If None, defaults to {"wl1", "wl2", "HbO", "HbR"}.
         """
         if allowed_keys is None:
-            self.allowed_keys = {"wl1", "wl2", "HbO", "HbR"}
+            self.allowed_keys = {"data", "wl1", "wl2", "HbO", "HbR"}
         else:
             self.allowed_keys = allowed_keys
 
@@ -56,4 +56,4 @@ class MLDataPreparer:
         warnable_keys = original_keys - processed_ml_keys
         
         if warnable_keys:
-            print(f"🔴 Warning: The following keys from session.processed_data were not included in 'data_for_ml': {sorted(list(warnable_keys))}") 
+            print(f"🔴 Warning: Keys included in 'data_for_ml': {sorted(list(processed_ml_keys))}. Keys excluded: {sorted(list(warnable_keys))}") 
