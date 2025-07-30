@@ -22,7 +22,7 @@
 
 TODO:
 - (lots of #TODO tags throughout the code, grep for them and fix)
-- ~~Update Anthony's PYTHONPATH, and get rid of his copy of `bvbabel` that's outside the repo. Cleaner that way.~~ ✅ **DONE**: Now using minimal vendored copy in `vendors/bvbabel_minimal` 
+- Anthony can get rid of his copy of bvbabel
 
 ## Virtual environment
 We want to all have the same environment, for now we don't use docker or conda, but we may switch to conda once we have multi-language code. For now we just make a clean virtual environment and share a `requirements.txt` file. 
@@ -36,6 +36,8 @@ and this will activate it:
 ```bash
 source ../venvs/lys-env/bin/activate
 ```
+
+the first time you create the venv you should run `pip install -r requirements.txt`.
 
 The virtual environment should have the latest version of python as of today, version `3.13.5`.
 
