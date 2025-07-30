@@ -6,6 +6,7 @@
 - [Data Directory Setup](#data-directory-setup)
 - [Demo Usage](#demo-usage)
   - [Processing Demo](#processing-demo)
+  - [ML Dataset Conversion Demo](#ml-dataset-conversion-demo)
 - [Notes on Project Architecture](#notes-on-project-architecture)
 - [Examples folder](#examples-folder)
 - [Visualization](#visualization)
@@ -92,7 +93,38 @@ experiment = processing_pipeline.apply(experiment)
 
 What `processing_pipeline.apply()` does is for each session, it loops through each processing step in the order they're listed, and applies that step's `.process()` method to the session's `processed_data` attribute. Each `ProcessingStep` has keyword arguments, these are specified as above for `ReconstructWithEigenmodes`.
 
+At the end of a `ProcessingPipeline`, the `MLDataPreparer` is called, this basically takes your processed data and stacks it all together into a np array that can be used as `X` in your `(X,y)` training examples / labels. This will print a warning telling you which parts of your data were included, and which were excluded, by default it only takes these keys: `allowed_keys = {"data", "wl1", "wl2", "HbO", "HbR"}` but you can specify custom allowed keys (or just extend the list of allowed keys and merge that).
+
+
 - [ ] We may want to re-architect steps or processing so that stuff can happen "live", and then we'd fold pre-processing into processing and write the code such that non-live data is treated as live.
+
+### ML Dataset Conversion Demo
+
+Once you have processed an experiment, you can convert it into ML-ready datasets for training machine learning models. Here's how to split your experiment data into training, validation, and test sets:
+
+```python
+from lys.objects.experiment import create_experiment
+from lys.ml.experiment_to_dataset_converter import ExperimentToDatasetConverter
+from lys.ml.splitting_strategies import TemporalSplitter
+from lys.processing.pipeline import ProcessingPipeline
+
+experiment = create_experiment("perceived_speech", "flow2")
+
+# Apply processing pipeline (even with no steps, this ensures MLDataPreparer runs)
+pipeline = ProcessingPipeline([])
+experiment = pipeline.apply(experiment)
+
+splitter = TemporalSplitter()
+converter = ExperimentToDatasetConverter(splitter)
+datasets = converter.convert(experiment)
+
+# Access the split datasets
+print(f"Training set: {datasets.train.X.shape}")
+print(f"Validation set: {datasets.val.X.shape}")  
+print(f"Test set: {datasets.test.X.shape}")
+```
+
+You can use any data splitter that adheres to the DatasetSplitter ABC in `ml/splitting_strategies.py`.
 
 ## Notes on Project Architecture
 - We keep abstract classes in `/abstract_interfaces`, this is good for readability / future users of the code to easily find concepts.
