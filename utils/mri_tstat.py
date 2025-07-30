@@ -1,5 +1,5 @@
 import numpy as np
-import bvbabel as bv
+import lys.vendors.bvbabel_minimal as bv
 from pathlib import Path
 from typing import Dict, Tuple, Any
 
