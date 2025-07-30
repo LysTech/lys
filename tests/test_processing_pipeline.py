@@ -4,6 +4,22 @@ import numpy as np
 from lys.processing.pipeline import ProcessingPipeline
 from lys.processing.steps import BandpassFilter
 from lys.objects import Experiment, Session, Patient, Protocol
+from lys.ml.preparer import MLDataPreparer
+from lys.abstract_interfaces.processing_step import ProcessingStep
+
+
+class DummyProcessingStep(ProcessingStep):
+    """A dummy processing step for testing pipeline functionality."""
+    
+    def __init__(self, multiplier: float = 2.0, name: str = "DummyStep"):
+        self.multiplier = multiplier
+        self.name = name
+    
+    def _do_process(self, session: "Session") -> None:
+        """Multiply all data by the multiplier factor."""
+        for key in session.processed_data:
+            if isinstance(session.processed_data[key], np.ndarray):
+                session.processed_data[key] = session.processed_data[key] * self.multiplier
 
 
 class TestProcessingPipeline:
@@ -63,12 +79,55 @@ class TestProcessingPipeline:
         with pytest.raises(ValueError):
             pipeline._get_processing_step_class("ProcessingStep")
     
-    def test_apply_processes_sessions_with_bandpass_filter(self):
-        """Test that apply() correctly processes sessions and calls BandpassFilter.process."""
+    @patch('lys.processing.pipeline.MLDataPreparer')
+    def test_apply_calls_ml_preparer(self, mock_preparer_class):
+        """Test that apply() calls the MLDataPreparer."""
+        mock_preparer_instance = mock_preparer_class.return_value
+        
+        # Create a minimal experiment
+        raw_data = {"wl1": np.random.randn(10, 2), "wl2": np.random.randn(10, 2)}
+        patient = Patient(name="P01", segmentation=Mock(), mesh=Mock())
+        protocol = Protocol(intervals=[])
+        session = Session(patient=patient, protocol=protocol, raw_data=raw_data)
+        experiment = Experiment(name="test", scanner="nirs", sessions=[session])
+        
+        pipeline = ProcessingPipeline(config=[])
+        pipeline.apply(experiment)
+        
+        mock_preparer_instance.prepare.assert_called_once_with(session)
+
+    def test_pipeline_creates_data_for_ml_key(self):
+        """Test that the pipeline correctly creates the data_for_ml key."""
+        # Create a simple session with some data that can be prepared
+        raw_data = {
+            "wl1": np.array([[1, 2], [3, 4]]),
+            "wl2": np.array([[5, 6], [7, 8]])
+        }
+        patient = Patient(name="P01", segmentation=Mock(), mesh=Mock())
+        protocol = Protocol(intervals=[])
+        session = Session(patient=patient, protocol=protocol, raw_data=raw_data)
+        
+        # The session's processed_data will initially be a copy of raw_data
+        session.processed_data = session.raw_data.copy()
+
+        experiment = Experiment(name="test", scanner="nirs", sessions=[session])
+        
+        # Create a pipeline with no processing steps, so only the preparer runs
+        pipeline = ProcessingPipeline(config=[])
+        pipeline.apply(experiment)
+        
+        assert "data_for_ml" in session.processed_data
+        assert session.processed_data["data_for_ml"].shape == (2, 2, 2)
+        
+        expected_data = np.stack([raw_data["wl1"], raw_data["wl2"]], axis=-1)
+        np.testing.assert_array_equal(session.processed_data["data_for_ml"], expected_data)
+
+    def test_apply_processes_sessions_with_dummy_step(self):
+        """Test that apply() correctly processes sessions and calls processing step."""
         # Create simple test data
         raw_data = {
-            "wl1": np.random.randn(100, 10),
-            "wl2": np.random.randn(100, 10)
+            "wl1": np.array([[1.0, 2.0], [3.0, 4.0]]),
+            "wl2": np.array([[5.0, 6.0], [7.0, 8.0]])
         }
         
         # Create minimal Patient and Protocol objects
@@ -111,14 +170,10 @@ class TestProcessingPipeline:
         for key in session2.processed_data:
             np.testing.assert_array_equal(session2.processed_data[key], session2.raw_data[key])
         
-        # Create pipeline with BandpassFilter
-        config = [
-            {"BandpassFilter": {
-                "lower_bound": 0.01,
-                "upper_bound": 0.1,
-            }},
-        ]
-        pipeline = ProcessingPipeline(config)
+        # Create pipeline with dummy step
+        dummy_step = DummyProcessingStep(multiplier=3.0, name="TestDummy")
+        pipeline = ProcessingPipeline(config=[])
+        pipeline.steps = [dummy_step]  # Directly add our dummy step
         
         # Apply the pipeline
         pipeline.apply(experiment)
@@ -127,26 +182,28 @@ class TestProcessingPipeline:
         assert session1.processed_data is not session1.raw_data
         assert session2.processed_data is not session2.raw_data
         
-        # Verify that the data has been modified (should be different due to filtering)
-        assert not np.array_equal(session1.processed_data["wl1"], session1.raw_data["wl1"])
-        assert not np.array_equal(session1.processed_data["wl2"], session1.raw_data["wl2"])
-        assert not np.array_equal(session2.processed_data["wl1"], session2.raw_data["wl1"])
-        assert not np.array_equal(session2.processed_data["wl2"], session2.raw_data["wl2"])
+        # Verify that the data has been modified (should be multiplied by 3)
+        expected_wl1 = raw_data["wl1"] * 3.0
+        expected_wl2 = raw_data["wl2"] * 3.0
+        np.testing.assert_array_equal(session1.processed_data["wl1"], expected_wl1)
+        np.testing.assert_array_equal(session1.processed_data["wl2"], expected_wl2)
+        np.testing.assert_array_equal(session2.processed_data["wl1"], expected_wl1)
+        np.testing.assert_array_equal(session2.processed_data["wl2"], expected_wl2)
         
         # Verify that processing metadata was recorded
         assert "processing_steps" in session1.metadata
         assert "processing_steps" in session2.metadata
         assert len(session1.metadata["processing_steps"]) == 1
         assert len(session2.metadata["processing_steps"]) == 1
-        assert session1.metadata["processing_steps"][0]["step_name"] == "BandpassFilter"
-        assert session2.metadata["processing_steps"][0]["step_name"] == "BandpassFilter"
+        assert session1.metadata["processing_steps"][0]["step_name"] == "DummyProcessingStep"
+        assert session2.metadata["processing_steps"][0]["step_name"] == "DummyProcessingStep"
 
     def test_apply_records_step_parameters_in_metadata(self):
         """Test that apply() correctly records step parameters in metadata."""
         # Create simple test data
         raw_data = {
-            "wl1": np.random.randn(100, 10),
-            "wl2": np.random.randn(100, 10)
+            "wl1": np.array([[1.0, 2.0], [3.0, 4.0]]),
+            "wl2": np.array([[5.0, 6.0], [7.0, 8.0]])
         }
         
         # Create minimal Patient and Protocol objects
@@ -173,14 +230,10 @@ class TestProcessingPipeline:
             sessions=[session]
         )
         
-        # Create pipeline with BandpassFilter
-        config = [
-            {"BandpassFilter": {
-                "lower_bound": 0.01,
-                "upper_bound": 0.1,
-            }},
-        ]
-        pipeline = ProcessingPipeline(config)
+        # Create pipeline with dummy step
+        dummy_step = DummyProcessingStep(multiplier=2.5, name="MetadataTest")
+        pipeline = ProcessingPipeline(config=[])
+        pipeline.steps = [dummy_step]  # Directly add our dummy step
         
         # Apply the pipeline
         pipeline.apply(experiment)
@@ -189,8 +242,8 @@ class TestProcessingPipeline:
         assert "processing_steps" in session.metadata
         assert len(session.metadata["processing_steps"]) == 1
         step_info = session.metadata["processing_steps"][0]
-        assert step_info["step_name"] == "BandpassFilter"
-        assert "lower_bound" in step_info
-        assert step_info["lower_bound"] == 0.01
-        assert "upper_bound" in step_info
-        assert step_info["upper_bound"] == 0.1 
+        assert step_info["step_name"] == "DummyProcessingStep"
+        assert "multiplier" in step_info
+        assert step_info["multiplier"] == 2.5
+        assert "name" in step_info
+        assert step_info["name"] == "MetadataTest" 

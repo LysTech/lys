@@ -305,8 +305,8 @@ class TestLoadNpzOrError:
 
 
 def test_get_session_paths_fnirs_8classes():
-    """Test that fnirs_8classes experiment returns all 8 sessions."""
-    session_paths = get_session_paths('fnirs_8classes', 'nirs')
+    """Test that 8classes experiment returns all 8 sessions."""
+    session_paths = get_session_paths('8classes', 'nirs')
     assert len(session_paths) == 8, f"Expected 8 sessions, got {len(session_paths)}"
 
 

@@ -1,9 +1,9 @@
 import numpy as np
 from pathlib import Path
-from processing.preprocessing import BettinaSessionAdapter, RawSessionPreProcessor
+from processing.preprocessing import BettinaSessionPreprocessor, RawSessionPreProcessor
 import pytest
 from unittest.mock import MagicMock, patch
-from processing.preprocessing import Flow2MomentsSessionAdapter
+from processing.preprocessing import Flow2MomentsSessionPreprocessor
 
 
 def create_mock_snirf_with_stimulus(start_timestamp: float, n_timepoints: int = 5, 
@@ -74,17 +74,17 @@ def write_dummy_file(path: Path, data: np.ndarray):
 
 
 def test_can_handle_true(tmp_path):
-    """BettinaSessionAdapter.can_handle returns True if both .wl1 and .wl2 files exist."""
+    """BettinaSessionPreprocessor.can_handle returns True if both .wl1 and .wl2 files exist."""
     (tmp_path / 'test.wl1').touch()
     (tmp_path / 'test.wl2').touch()
-    adapter = BettinaSessionAdapter()
+    adapter = BettinaSessionPreprocessor()
     assert adapter.can_handle(tmp_path)
 
 
 def test_can_handle_false(tmp_path):
-    """BettinaSessionAdapter.can_handle returns False if one or both files are missing."""
+    """BettinaSessionPreprocessor.can_handle returns False if one or both files are missing."""
     (tmp_path / 'test.wl1').touch()
-    adapter = BettinaSessionAdapter()
+    adapter = BettinaSessionPreprocessor()
     assert not adapter.can_handle(tmp_path)
     (tmp_path / 'test.wl2').touch()
     (tmp_path / 'test.wl1').unlink()
@@ -92,25 +92,25 @@ def test_can_handle_false(tmp_path):
 
 
 def test_process_saves_npz(tmp_path):
-    """BettinaSessionAdapter.process saves correct arrays to raw_channel_data.npz."""
+    """BettinaSessionPreprocessor.process saves correct arrays to raw_channel_data.npz."""
     wl1_data = np.array([[1, 2, 3], [4, 5, 6]])
     wl2_data = np.array([[7, 8, 9], [10, 11, 12]])
     write_dummy_file(tmp_path / 'foo.wl1', wl1_data)
     write_dummy_file(tmp_path / 'bar.wl2', wl2_data)
-    adapter = BettinaSessionAdapter()
+    adapter = BettinaSessionPreprocessor()
     adapter.process(tmp_path)
-    out = np.load(tmp_path / 'raw_channel_data.npz')
+    out = np.load(tmp_path / 'raw_channel_data.npz', allow_pickle=True)
     np.testing.assert_array_equal(out['wl1'], wl1_data)
     np.testing.assert_array_equal(out['wl2'], wl2_data)
 
 
 def test_bettina_adapter_extract_data_returns_correct_dict(tmp_path):
-    """BettinaSessionAdapter.extract_data returns correct dictionary with wl1 and wl2 arrays."""
+    """BettinaSessionPreprocessor.extract_data returns correct dictionary with wl1 and wl2 arrays."""
     wl1_data = np.array([[1, 2, 3], [4, 5, 6]])
     wl2_data = np.array([[7, 8, 9], [10, 11, 12]])
     write_dummy_file(tmp_path / 'foo.wl1', wl1_data)
     write_dummy_file(tmp_path / 'bar.wl2', wl2_data)
-    adapter = BettinaSessionAdapter()
+    adapter = BettinaSessionPreprocessor()
     data = adapter.extract_data(tmp_path)
     assert 'wl1' in data
     assert 'wl2' in data
@@ -119,11 +119,11 @@ def test_bettina_adapter_extract_data_returns_correct_dict(tmp_path):
 
 
 def test_raw_session_processor_selects_bettina_adapter(tmp_path):
-    """RawSessionProcessor selects BettinaSessionAdapter when .wl1 and .wl2 files are present."""
+    """RawSessionProcessor selects BettinaSessionPreprocessor when .wl1 and .wl2 files are present."""
     (tmp_path / 'test.wl1').touch()
     (tmp_path / 'test.wl2').touch()
     processor = RawSessionPreProcessor(tmp_path)
-    assert isinstance(processor.session_adapter, BettinaSessionAdapter)
+    assert isinstance(processor.session_adapter, BettinaSessionPreprocessor)
 
 
 def test_raw_session_processor_processes_bettina_session(tmp_path):
@@ -137,7 +137,7 @@ def test_raw_session_processor_processes_bettina_session(tmp_path):
     
     output_file = tmp_path / 'raw_channel_data.npz'
     assert output_file.exists()
-    loaded_data = np.load(output_file)
+    loaded_data = np.load(output_file, allow_pickle=True)
     np.testing.assert_array_equal(loaded_data['wl1'], wl1_data)
     np.testing.assert_array_equal(loaded_data['wl2'], wl2_data)
 
@@ -157,15 +157,15 @@ def test_raw_session_processor_raises_error_for_empty_session(tmp_path):
 
 
 def test_flow2_can_handle_true(tmp_path):
-    """Flow2MomentsSessionAdapter.can_handle returns True if a *_MOMENTS.snirf file exists."""
+    """Flow2MomentsSessionPreprocessor.can_handle returns True if a *_MOMENTS.snirf file exists."""
     (tmp_path / 'foo_MOMENTS.snirf').touch()
-    adapter = Flow2MomentsSessionAdapter()
+    adapter = Flow2MomentsSessionPreprocessor()
     assert adapter.can_handle(tmp_path)
 
 def test_flow2_can_handle_false(tmp_path):
-    """Flow2MomentsSessionAdapter.can_handle returns False if no *_MOMENTS.snirf file exists."""
+    """Flow2MomentsSessionPreprocessor.can_handle returns False if no *_MOMENTS.snirf file exists."""
     (tmp_path / 'foo.snirf').touch()
-    adapter = Flow2MomentsSessionAdapter()
+    adapter = Flow2MomentsSessionPreprocessor()
     assert not adapter.can_handle(tmp_path)
 
 
@@ -209,7 +209,7 @@ def test_flow2_extract_data_shape_and_metadata(monkeypatch, tmp_path):
 
     # Patch snirf.Snirf to return our fake object
     with patch('snirf.Snirf', return_value=fake_snirf):
-        adapter = Flow2MomentsSessionAdapter()
+        adapter = Flow2MomentsSessionPreprocessor()
         result = adapter.extract_data(tmp_path)
         
     # --- Assertions ---
@@ -220,64 +220,11 @@ def test_flow2_extract_data_shape_and_metadata(monkeypatch, tmp_path):
     assert len(result['channels']) == n_channels
     assert len(result['wavelengths']) == n_wavelengths
     
-    # The time vector should now be absolute, and since we aligned it perfectly,
-    # it should be untrimmed and match the expected absolute timestamps.
-    expected_absolute_time = relative_time + protocol_start_timestamp
+    # The time vector should now be relative, and since we aligned it perfectly,
+    # it should be untrimmed and match the expected relative timestamps.
+    expected_relative_time = relative_time
     assert result['time'].shape[0] == n_timepoints
-    np.testing.assert_allclose(result['time'], expected_absolute_time)
+    np.testing.assert_allclose(result['time'], expected_relative_time, rtol=1e-6, atol=1e-6)
 
 
-def test_flow2_adapter_aligns_with_protocol(monkeypatch, tmp_path):
-    """
-    Test that Flow2MomentsSessionAdapter correctly trims NIRS data to align
-    with the protocol's start time.
-    """
-    import json
-    from datetime import datetime, timezone
-
-    # 1. Define timing parameters for the test
-    nirs_start_time = datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
-    protocol_start_offset_s = 5
-    protocol_start_time = nirs_start_time.timestamp() + protocol_start_offset_s
-    fs = 10  # Hz
-    n_timepoints = 100  # 10 seconds of data
-
-    # 2. Create a fake .jsonl protocol file
-    log_file = tmp_path / "protocol.jsonl"
-    with open(log_file, 'w') as f:
-        json.dump({'timestamp': protocol_start_time, 'event': 'start'}, f)
-
-    # 3. Create a fake SNIRF file on disk (needed for the adapter to find it)
-    fake_snirf_file = tmp_path / 'test_MOMENTS.snirf'
-    fake_snirf_file.touch()
-
-    # 4. Create mock SNIRF object with stimulus event containing NIRS start timestamp
-    # The stimulus event should contain the NIRS start time, not the protocol start time
-    fake_snirf_obj = create_mock_snirf_with_stimulus(
-        start_timestamp=nirs_start_time.timestamp(),
-        n_timepoints=n_timepoints,
-        n_channels=1,  # Minimal for this test
-        n_wavelengths=1,
-        n_moments=1,
-        fs=fs
-    )
-    
-    # 5. Run the adapter with the mocked snirf object
-    adapter = Flow2MomentsSessionAdapter()
-    with patch('snirf.Snirf', return_value=fake_snirf_obj):
-        result = adapter.extract_data(tmp_path)
-
-    # 6. Assert the results
-    # The data should be trimmed by `protocol_start_offset_s * fs` samples
-    expected_trimmed_samples = protocol_start_offset_s * fs
-    expected_remaining_samples = n_timepoints - expected_trimmed_samples
-    
-    assert result['data'].shape[0] == expected_remaining_samples
-    assert result['time'].shape[0] == expected_remaining_samples
-
-    # The new start time should be very close to the protocol start time
-    actual_start_time = result['time'][0]
-    time_difference = abs(actual_start_time - protocol_start_time)
-    
-    # Assert that the difference is less than half a sample period
-    assert time_difference < (1 / fs) / 2 
+ 

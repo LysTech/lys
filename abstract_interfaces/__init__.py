@@ -9,6 +9,6 @@ implementations must follow.
 
 from lys.abstract_interfaces.plottable import Plottable
 from lys.abstract_interfaces.processing_step import ProcessingStep
-from lys.abstract_interfaces.session_adapters import ISessionAdapter
+from lys.abstract_interfaces.session_preprocessor import ISessionPreprocessor
 
-__all__ = ['Plottable', 'ProcessingStep', 'ISessionAdapter'] 
+__all__ = ['Plottable', 'ProcessingStep', 'ISessionPreprocessor'] 

@@ -34,7 +34,7 @@ class Session:
     raw_data: Dict[str, np.ndarray]
     jacobians: Optional[Sequence[Jacobian]] = None
     physio_data: Optional[Dict[str, np.ndarray]] = None
-    processed_data: Any = None #TODO: perhaps clarify the type, not super sure...
+    processed_data: Dict[str, Any] = None
     metadata: Dict[str, Any] = field(default_factory=lambda: {"processing_steps": []})
 
     def __post_init__(self):

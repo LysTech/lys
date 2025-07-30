@@ -36,14 +36,14 @@ def test_protocol_from_perceived_speech_log(perceived_speech_log_file: Path):
 
     # Check the content of the first interval
     interval1 = protocol.intervals[0]
-    assert interval1[0] == 1700000000.0  # t_start (timestamp)
-    assert interval1[1] == pytest.approx(1700000000.0 + 0.4)  # t_end (timestamp + duration)
+    assert interval1[0] == 0.0  # t_start (timestamp)
+    assert interval1[1] == pytest.approx(0.0 + 0.4)  # t_end (timestamp + duration)
     assert interval1[2] == "Hello"  # label (word)
 
     # Check the content of the second interval
     interval2 = protocol.intervals[1]
-    assert interval2[0] == 1700000002.0  # t_start
-    assert interval2[1] == pytest.approx(1700000002.0 + 0.4) # t_end
+    assert interval2[0] == 2.0  # t_start
+    assert interval2[1] == pytest.approx(2.0 + 0.4) # t_end
     assert interval2[2] == "World"  # label
     
     # Check the unique tasks

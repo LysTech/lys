@@ -1,13 +1,12 @@
 # Lys
 
-Breaking change in latest merge: now the data structure shouldn't be data/P03, but data/subjects/P03.
-
 ## Table of Contents
 
 - [Data Folder Structure](#data-folder-structure)
 - [Data Directory Setup](#data-directory-setup)
 - [Demo Usage](#demo-usage)
   - [Processing Demo](#processing-demo)
+  - [ML Dataset Conversion Demo](#ml-dataset-conversion-demo)
 - [Notes on Project Architecture](#notes-on-project-architecture)
 - [Examples folder](#examples-folder)
 - [Visualization](#visualization)
@@ -94,7 +93,38 @@ experiment = processing_pipeline.apply(experiment)
 
 What `processing_pipeline.apply()` does is for each session, it loops through each processing step in the order they're listed, and applies that step's `.process()` method to the session's `processed_data` attribute. Each `ProcessingStep` has keyword arguments, these are specified as above for `ReconstructWithEigenmodes`.
 
+At the end of a `ProcessingPipeline`, the `MLDataPreparer` is called, this basically takes your processed data and stacks it all together into a np array that can be used as `X` in your `(X,y)` training examples / labels. This will print a warning telling you which parts of your data were included, and which were excluded, by default it only takes these keys: `allowed_keys = {"data", "wl1", "wl2", "HbO", "HbR"}` but you can specify custom allowed keys (or just extend the list of allowed keys and merge that).
+
+
 - [ ] We may want to re-architect steps or processing so that stuff can happen "live", and then we'd fold pre-processing into processing and write the code such that non-live data is treated as live.
+
+### ML Dataset Conversion Demo
+
+Once you have processed an experiment, you can convert it into ML-ready datasets for training machine learning models. Here's how to split your experiment data into training, validation, and test sets:
+
+```python
+from lys.objects.experiment import create_experiment
+from lys.ml.experiment_to_dataset_converter import ExperimentToDatasetConverter
+from lys.ml.splitting_strategies import TemporalSplitter
+from lys.processing.pipeline import ProcessingPipeline
+
+experiment = create_experiment("perceived_speech", "flow2")
+
+# Apply processing pipeline (even with no steps, this ensures MLDataPreparer runs)
+pipeline = ProcessingPipeline([])
+experiment = pipeline.apply(experiment)
+
+splitter = TemporalSplitter()
+converter = ExperimentToDatasetConverter(splitter)
+datasets = converter.convert(experiment)
+
+# Access the split datasets
+print(f"Training set: {datasets.train.X.shape}")
+print(f"Validation set: {datasets.val.X.shape}")  
+print(f"Test set: {datasets.test.X.shape}")
+```
+
+You can use any data splitter that adheres to the DatasetSplitter ABC in `ml/splitting_strategies.py`.
 
 ## Notes on Project Architecture
 - We keep abstract classes in `/abstract_interfaces`, this is good for readability / future users of the code to easily find concepts.
@@ -208,25 +238,22 @@ The system uses the **Strategy pattern** to automatically select the appropriate
 **How to Use Preprocessing:**
 
 ```python
-from lys.processing.preprocessing import RawSessionPreProcessor
-from lys.utils.paths import get_session_paths
+from lys.processing.preprocessing import preprocess_experiment, RawSessionPreProcessor
 from pathlib import Path
 
-# Process a single session:
+# Process a whole experiment (recommended):
+preprocess_experiment("perceived_speech", "flow2")
+
+# Process a single session (for more control):
 session_path = Path("/path/to/session/directory")
 RawSessionPreProcessor.preprocess(session_path)
-
-# Process a whole experiment:
-paths = get_session_paths("experiment_name", "scanner_name")
-for path in paths:
-    RawSessionPreProcessor.preprocess(path)
 ```
 
 
 **How It Works:**
 
 1. **Automatic Adapter Selection**: The `RawSessionPreProcessor` automatically detects the appropriate adapter by examining the files in the session directory
-2. **Device-Specific Processing**: Each adapter (like `BettinaSessionAdapter`) handles the specific file formats and data extraction for that device
+2. **Device-Specific Processing**: Each adapter (like `BettinaSessionPreprocessor`) handles the specific file formats and data extraction for that device
 3. **Standardized Output**: All adapters produce `.npz` files with consistent naming (`raw_channel_data.npz`) for easy loading
 
 If you just want to check what a preprocessor does you could also do this:
@@ -236,7 +263,7 @@ If you just want to check what a preprocessor does you could also do this:
     from lys.utils.paths import lys_subjects_dir
     
     session_path = Path(os.path.join(lys_subjects_dir(), "P20/flow2/perceived_speech/session-1"))
-    processor = Flow2MomentsSessionAdapter()
+    processor = Flow2MomentsSessionPreprocessor()
     data = processor.extract_data(session_path)
 ```
 
@@ -247,12 +274,14 @@ If you just want to check what a preprocessor does you could also do this:
 
 **Extending for New Devices:**
 
-To add support for a new device, implement a new adapter class that inherits from `ISessionAdapter`:
+This design ensures that the core processing logic remains decoupled from the specifics of any given data acquisition system.
+
+To add support for a new device, implement a new adapter class that inherits from `ISessionPreprocessor`:
 
 ```python
-class NewDeviceAdapter(ISessionAdapter):
+class NewDeviceAdapter(ISessionPreprocessor):
     def can_handle(self, session_path: Path) -> bool:
-        # Check for device-specific files
+        # Check for device-specific files or extensions
         files = [f.name for f in session_path.iterdir() if f.is_file()]
         return any(file.endswith(".device_specific_extension") for file in files)
     
@@ -262,7 +291,7 @@ class NewDeviceAdapter(ISessionAdapter):
         return {'channel_data': data_array, 'metadata': metadata}
 ```
 
-The system will automatically detect and use your new adapter when processing sessions that contain the appropriate files.
+This modular approach makes it easy to extend the library's capabilities to new hardware without modifying the existing codebase.
 
 ## Some of our objects
 ### Patient Class

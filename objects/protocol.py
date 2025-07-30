@@ -52,10 +52,10 @@ class Protocol:
         Each line in the file is a JSON object representing an event. This method extracts
         'perceived_word' events and creates intervals from them.
 
-        The intervals are labeled with the 'word' field and their start/end times are
-        the absolute Unix timestamps of when the word started and stopped being perceived.
+        The intervals are labeled with the 'word' field. The start and end times are in
+        seconds, relative to the timestamp of the first event in the log, which is set to t=0.
         """
-        intervals = []
+        parsed_events = []
         with open(log_path, 'r') as f:
             for line in f:
                 log_entry = json.loads(line.strip())
@@ -63,19 +63,27 @@ class Protocol:
                 
                 if event_data.get('event_type') == 'perceived_word':
                     timestamp = log_entry.get('timestamp')
-                    start_ms = event_data.get('start_ms', 0)
-                    end_ms = event_data.get('end_ms', 0)
-                    word = event_data.get('word', 'unknown')
-
                     if timestamp is not None:
-                        # Calculate start and end time relative to the event's absolute timestamp
-                        # The log's start_ms and end_ms are relative to the audio start.
-                        # The log's timestamp is when the word was *detected*. We assume this is roughly the start time.
-                        # Let's use the timestamp as the start time, and timestamp + duration as end time.
+                        start_ms = event_data.get('start_ms', 0)
+                        end_ms = event_data.get('end_ms', 0)
+                        word = event_data.get('word', 'unknown')
                         duration_s = (end_ms - start_ms) / 1000.0
-                        t_start = timestamp
-                        t_end = timestamp + duration_s
-                        intervals.append((t_start, t_end, word))
+                        parsed_events.append({
+                            'timestamp': timestamp,
+                            'duration': duration_s,
+                            'word': word
+                        })
+
+        if not parsed_events:
+            return cls(intervals=[])
+
+        first_timestamp = min(event['timestamp'] for event in parsed_events)
+
+        intervals = []
+        for event in parsed_events:
+            t_start = event['timestamp'] - first_timestamp
+            t_end = t_start + event['duration']
+            intervals.append((t_start, t_end, event['word']))
         
         intervals.sort(key=lambda x: x[0])
         return cls(intervals=intervals)

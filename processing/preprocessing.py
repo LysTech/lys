@@ -1,8 +1,10 @@
 from pathlib import Path
 import numpy as np
 import snirf
+import warnings
 
-from lys.abstract_interfaces import ISessionAdapter
+from lys.utils.paths import get_session_paths
+from lys.abstract_interfaces.session_preprocessor import ISessionPreprocessor
 
 """ 
 Preprocessing: turning raw files of fucked format into useful .npz files that can be loaded (for processing!)
@@ -25,7 +27,7 @@ for path in paths:
     RawSessionPreProcessor.preprocess(path)
 """
 
-#TODO: currently we don't do optodes stuff for BettinaSessionAdapter
+#TODO: currently we don't do optodes stuff for BettinaSessionPreprocessor
 #TODO: generally figure out the optodes thing, see comment in Notion Architecture page
 
 class RawSessionPreProcessor:
@@ -39,14 +41,14 @@ class RawSessionPreProcessor:
         processor = cls(session_path)
         return processor.session_adapter.process(processor.session_path)
     
-    def _select_strategy(self) -> 'ISessionAdapter':
+    def _select_strategy(self) -> 'ISessionPreprocessor':
         """
         Select the appropriate strategy (adapter) based on session content.
         Uses the Strategy pattern to choose the best adapter for the job.
         """
         available_strategies = [
-            BettinaSessionAdapter(),
-            Flow2MomentsSessionAdapter(),
+            BettinaSessionPreprocessor(),
+            Flow2MomentsSessionPreprocessor(),
             # Add more adapters here as they're implemented
         ]
         
@@ -57,7 +59,7 @@ class RawSessionPreProcessor:
         raise ValueError(f"No suitable adapter found for session at {self.session_path}")
 
 
-class BettinaSessionAdapter(ISessionAdapter):
+class BettinaSessionPreprocessor(ISessionPreprocessor):
     def can_handle(self, session_path: Path) -> bool:
         """Check if this session contains the required .w;1 and .wl2 files for Bettina processing."""
         assert session_path.is_dir()
@@ -73,10 +75,23 @@ class BettinaSessionAdapter(ISessionAdapter):
         wl2_path = next(session_path.glob('*.wl2'))
         wl1 = np.loadtxt(wl1_path)
         wl2 = np.loadtxt(wl2_path)
-        return {'wl1': wl1, 'wl2': wl2}
+
+        fs = 3.4722
+        warnings.warn(
+            f"Using a hardcoded sampling frequency ({fs} Hz) for {session_path}. "
+            "Different sessions or devices may have slightly different sampling frequencies. "
+            "A more robust solution would be to extract this from metadata if available.",
+            UserWarning
+        )
+        
+        n_timepoints = wl1.shape[0]
+        time_vector = np.arange(n_timepoints) / fs
+        
+        return {'wl1': wl1, 'wl2': wl2, 
+                'time': time_vector}
 
 
-class Flow2MomentsSessionAdapter(ISessionAdapter):
+class Flow2MomentsSessionPreprocessor(ISessionPreprocessor):
     """
     Adapter for Kernel Flow2 .snirf files from the 'Moments' pipeline.
 
@@ -98,7 +113,7 @@ class Flow2MomentsSessionAdapter(ISessionAdapter):
         - 'channels': list of (source, detector) tuples
         - 'wavelengths': list of wavelength indices
         - 'moment_names': ['amplitude', 'mean_time_of_flight', 'variance']
-        - 'time': time vector (n_timepoints,) of absolute unix timestamps
+        - 'time': time vector (n_timepoints,) in seconds, relative to the NIRS stream's 'start_experiment' event.
         """
         snirf_path = next(session_path.glob('*_MOMENTS.snirf'))
         snirf_data = snirf.Snirf(str(snirf_path), 'r')
@@ -121,12 +136,14 @@ class Flow2MomentsSessionAdapter(ISessionAdapter):
             data, absolute_time_vector, session_path
         )
 
+        relative_time_vector = absolute_time_vector - start_timestamp
+
         return {
             'data': data,
             'channels': channel_wavelength_maps['channel_tuples'],
             'wavelengths': channel_wavelength_maps['wavelength_indices'],
             'moment_names': moment_names,
-            'time': absolute_time_vector,
+            'time': relative_time_vector,
         }
 
     def _get_nirs_start_timestamp(self, snirf_data: snirf.Snirf) -> float:
@@ -374,13 +391,66 @@ class Flow2MomentsSessionAdapter(ISessionAdapter):
         return int(alignment_index)
 
 
+def preprocess_experiment(experiment_name: str, scanner_name: str) -> None:
+    """
+    Preprocess all sessions for a given experiment and scanner combination.
+    
+    This function finds all session folders for the specified experiment/scanner pair
+    and processes each one using the appropriate session preprocessor. The resulting
+    data is saved as 'raw_channel_data.npz' in each session folder.
+    
+    If any existing raw_channel_data.npz files are found, the user will be prompted
+    once to confirm overwriting all of them.
+    
+    Args:
+        experiment_name: Name of the experiment (e.g., 'perceived_speech')
+        scanner_name: Name of the scanner/device (e.g., 'flow2', 'bettina')
+        
+    Raises:
+        FileNotFoundError: If no sessions are found for the given experiment/scanner combination
+        ValueError: If no suitable preprocessor adapter is found for a session
+        SystemExit: If user chooses not to overwrite existing files
+    """
+    
+    session_paths = get_session_paths(experiment_name, scanner_name)
+    
+    print(f"Found {len(session_paths)} sessions for experiment '{experiment_name}' with scanner '{scanner_name}'")
+    
+    # Check for existing raw_channel_data.npz files
+    existing_files = []
+    for session_path in session_paths:
+        npz_file = session_path / 'raw_channel_data.npz'
+        if npz_file.exists():
+            existing_files.append(npz_file)
+    
+    if existing_files:
+        print(f"\n⚠️  Found {len(existing_files)} existing raw_channel_data.npz files:")
+        for file_path in existing_files:
+            print(f"  - {file_path}")
+        
+        response = input("\nOverwrite all existing files? (y/N): ").strip().lower()
+        if response != 'y':
+            print("❌ Preprocessing cancelled by user.")
+            return
+        print()
+    
+    for session_path in session_paths:
+        try:
+            print(f"Processing session: {session_path}")
+            RawSessionPreProcessor.preprocess(session_path)
+            print(f"✅ Successfully processed: {session_path}")
+        except Exception as e:
+            print(f"❌ Failed to process {session_path}: {e}")
+            raise
+
+
 if __name__=="__main__":
     import os
     from lys.utils.paths import lys_subjects_dir
     
     session_path = Path(os.path.join(lys_subjects_dir(), "P20/flow2/perceived_speech/session-1"))
     
-    processor = Flow2MomentsSessionAdapter()
+    processor = Flow2MomentsSessionPreprocessor()
     data = processor.extract_data(session_path)
-    #RawSessionPreProcessor.preprocess(session_path)
+    RawSessionPreProcessor.preprocess(session_path)
     
