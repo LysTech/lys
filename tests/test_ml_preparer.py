@@ -73,10 +73,10 @@ class TestMLDataPreparer:
         
         captured = capsys.readouterr()
         
-        assert "Warning: The following keys from session.processed_data were not included" in captured.out
+        assert "Warning: Keys included in 'data_for_ml'" in captured.out
+        assert "Keys excluded:" in captured.out
         assert "extra_key_1" in captured.out
         assert "extra_key_2" in captured.out
-        assert "HbO" not in captured.out
 
     def test_prepare_with_custom_allowed_keys(self):
         """Test that prepare() works correctly with custom allowed keys."""
