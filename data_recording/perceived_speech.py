@@ -1,4 +1,3 @@
-import whisper
 import json
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Iterator, Tuple

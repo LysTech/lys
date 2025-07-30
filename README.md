@@ -22,6 +22,24 @@
 
 TODO:
 - (lots of #TODO tags throughout the code, grep for them and fix)
+- ~~Update Anthony's PYTHONPATH, and get rid of his copy of `bvbabel` that's outside the repo. Cleaner that way.~~ ✅ **DONE**: Now using minimal vendored copy in `vendors/bvbabel_minimal` 
+
+## Virtual environment
+We want to all have the same environment, for now we don't use docker or conda, but we may switch to conda once we have multi-language code. For now we just make a clean virtual environment and share a `requirements.txt` file. 
+
+This will create the virtual environment in linux/mac:
+```bash
+mkdir -p ../venvs && python3 -m venv ../venvs/lys-env
+```
+and this will activate it:
+
+```bash
+source ../venvs/lys-env/bin/activate
+```
+
+The virtual environment should have the latest version of python as of today, version `3.13.5`.
+
+(I like to have a keyboard shortcut for entering the venv, you can define an `alias` in `.zshrc` for that).
 
 ## Data Folder Structure
 
@@ -38,13 +56,8 @@ LYS_DATA_DIR="/Users/thomasrialan/Documents/code/Geometric-Eigenmodes/data"
 export LYS_DATA_DIR
 ```
 
-Make sure to restart your terminal or source your shell configuration after making this change:
-
-```bash
-source ~/.bashrc  # or source ~/.zshrc
-```
-
 This is cool because now we can call `lys.utils.paths.lys_data_dir()` and even if we have different computers it'll work for us all.
+
 ## Demo Usage
 
 We have some demo scripts in `/scripts`, here we discuss them a bit.
