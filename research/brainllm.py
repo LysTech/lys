@@ -1,9 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 from dataclasses import dataclass
-import re
-from pathlib import Path
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import AdamW
@@ -16,7 +14,6 @@ from lys.ml.splitting_strategies import TemporalSplitter
 from lys.objects.experiment import create_experiment
 from lys.processing.pipeline import ProcessingPipeline
 from lys.ml.dataset import MLDataset
-from lys.objects.session import Session
 
 
 class BrainAdapter(nn.Module):
@@ -106,10 +103,6 @@ class BrainAdapter(nn.Module):
         return x
 
 
-#TODO: reflect on the best data format: first half of sentence, or that + preceding text?
-#TODO: I need a tokenizer for the text data. Needs to be ABC and have a tokenize method so I can do GPT-2 but also llama-2 etc. First define the ABC.
-#TODO: think about the duplicate/triplicate word in the protocol issue. Discuss with Anthony.
-
 @dataclass
 class BrainLLMDataset:
     """
@@ -123,115 +116,11 @@ class BrainLLMDataset:
     brain_data: List[np.ndarray]  # Brain data for each sample
     prompts: List[str]  # Text prompts 
     continuations: List[str]  # Target continuations
-    
-    def to_scorer_format(self) -> List[Tuple[str, str, str]]:
-        """
-        Convert to format expected by scorer: List[Tuple[prompt, model_continuation, correct_continuation]]
-        For now, we'll use the correct continuation as the model continuation for testing.
-        """
-        return [(prompt, continuation, continuation) 
-                for prompt, continuation in zip(self.prompts, self.continuations)]
-
-
-def find_non_overlapping_split(y_array: np.ndarray, start_ix: int, end_ix: int) -> int:
-    """
-    Find a split point near the middle of a sentence that avoids word overlaps, e.g. don't split 
-
-    ["the", "house", "house", "is", "red"] into ["the", "house"], ["house", "is", "red"]
-
-    but instead into ["the", "house", "house"], ["is", "red"]
-    
-    This function ensures that the word at the end of the prompt doesn't match
-    the word at the beginning of the continuation.
-    
-    Args:
-        y_array: Array of words/tokens
-        start_ix: Starting index of the sentence
-        end_ix: Ending index of the sentence (exclusive)
-        
-    Returns:
-        Split index that avoids word overlaps
-    """
-    # Start with the approximate middle
-    middle = int((start_ix + end_ix) / 2)
-    
-    # Ensure we have at least one word on each side
-    if middle <= start_ix:
-        middle = start_ix + 1
-    if middle >= end_ix:
-        middle = end_ix - 1
-    
-    # Check for overlap and adjust if necessary
-    current_split = middle
-    max_attempts = min(10, (end_ix - start_ix) // 2)  # Don't search too far
-    
-    for offset in range(max_attempts):
-        # Try current position
-        if current_split > start_ix and current_split < end_ix:
-            last_prompt_word = str(y_array[current_split - 1])
-            first_continuation_word = str(y_array[current_split])
-            
-            if last_prompt_word != first_continuation_word:
-                return current_split
-        
-        # Try positions alternating before and after middle
-        if offset > 0:
-            # Try before
-            before = middle - offset
-            if before > start_ix:
-                last_prompt_word = str(y_array[before - 1])
-                first_continuation_word = str(y_array[before])
-                if last_prompt_word != first_continuation_word:
-                    return before
-            
-            # Try after
-            after = middle + offset
-            if after < end_ix:
-                last_prompt_word = str(y_array[after - 1])
-                first_continuation_word = str(y_array[after])
-                if last_prompt_word != first_continuation_word:
-                    return after
-    
-    # If no non-overlapping split found, return middle anyway
-    return middle
-
-
-def remove_consecutive_duplicates(word_array: np.ndarray) -> np.ndarray:
-    """
-    Remove consecutive duplicate words from an array.
-
-    ["the", "house", "house", "is", "red"] becomes ["the", "house", "is", "red"]
-    
-    Args:
-        word_array: Array of words/tokens
-        
-    Returns:
-        Array with consecutive duplicates removed
-    """
-    if len(word_array) == 0:
-        return word_array
-    
-    deduplicated = [word_array[0]]
-    for i in range(1, len(word_array)):
-        if str(word_array[i]) != str(word_array[i-1]):
-            deduplicated.append(word_array[i])
-    
-    return np.array(deduplicated)
 
 
 def find_sentence_endings(y_array: np.ndarray) -> np.ndarray:
     """
     Find indices of sentence endings, handling consecutive periods correctly.
-    
-    When multiple periods appear consecutively, only the last one is considered
-    the true sentence ending. This prevents creating empty prompts or single-period
-    continuations.
-    
-    Args:
-        y_array: Array of words/tokens
-        
-    Returns:
-        Array of indices where sentences end
     """
     # Find all indices where the element is exactly a period
     all_period_indices = np.where([str(y) == "." for y in y_array])[0]
@@ -254,8 +143,6 @@ def find_sentence_endings(y_array: np.ndarray) -> np.ndarray:
 def convert_dataset_to_brainllm_format(dataset: MLDataset) -> BrainLLMDataset:
     """
     Convert MLDataset to BrainLLMDataset format with prompt/continuation pairs.
-    
-    Splits sentences at points that avoid word overlaps between prompts and continuations.
     """
     sentence_end_indices = find_sentence_endings(dataset.y)
     
@@ -263,181 +150,37 @@ def convert_dataset_to_brainllm_format(dataset: MLDataset) -> BrainLLMDataset:
     continuations = []
     brain_data_list = []
     last_ix = 0
+    
     for ix in sentence_end_indices:
         # Skip if this would create an empty sentence
         if ix <= last_ix:
             continue
             
-        # The brain data corresponds to the full sentence (prompt + continuation)
-        sentence_brain_data = dataset.X[last_ix:ix + 1] # Slicing up to and including the end of sentence
+        # Split approximately in the middle
+        split_point = (last_ix + ix) // 2
         
-        split_point = find_non_overlapping_split(dataset.y, last_ix, ix)
-        prompt = dataset.y[last_ix:split_point]
-        continuation = dataset.y[split_point:ix]
-        
-        # Remove consecutive duplicates from both prompt and continuation
-        prompt_deduplicated = remove_consecutive_duplicates(prompt)
-        continuation_deduplicated = remove_consecutive_duplicates(continuation)
-        
-        # Skip if either prompt or continuation would be empty after deduplication
-        if len(prompt_deduplicated) == 0 or len(continuation_deduplicated) == 0:
+        # Ensure we have at least one token on each side
+        if split_point <= last_ix or split_point >= ix:
             continue
+            
+        # Get the brain data and text for prompt and continuation
+        prompt_brain_data = dataset.X[last_ix:split_point]
+        continuation_brain_data = dataset.X[split_point:ix + 1]  # Include the period
         
-        prompts.append(prompt_deduplicated)
-        continuations.append(continuation_deduplicated)
-        brain_data_list.append(sentence_brain_data)
+        prompt_text = " ".join(str(word) for word in dataset.y[last_ix:split_point])
+        continuation_text = " ".join(str(word) for word in dataset.y[split_point:ix + 1])
+        
+        prompts.append(prompt_text)
+        continuations.append(continuation_text)
+        brain_data_list.append({
+            'prompt': prompt_brain_data,
+            'continuation': continuation_brain_data,
+            'full': dataset.X[last_ix:ix + 1]
+        })
+        
         last_ix = ix + 1  # Move past the period
+        
     return BrainLLMDataset(brain_data=brain_data_list, prompts=prompts, continuations=continuations)
-
-
-class DummyScorer:
-    """
-    Simple dummy scorer for prototyping purposes.
-    Returns scores based on simple heuristics to simulate realistic performance curves.
-    """
-    
-    def __init__(self, base_score: float = 0.3, noise_factor: float = 0.1):
-        """
-        Initialize dummy scorer.
-        
-        Args:
-            base_score: Base score for completely random text
-            noise_factor: Amount of random noise to add
-        """
-        self.base_score = base_score
-        self.noise_factor = noise_factor
-    
-    def _simple_similarity(self, candidate: str, reference: str) -> float:
-        """
-        Calculate a simple similarity score between candidate and reference.
-        
-        Args:
-            candidate: Generated text
-            reference: Reference (ground truth) text
-            
-        Returns:
-            Similarity score between 0 and 1
-        """
-        if not candidate or not reference:
-            return 0.0
-        
-        candidate_words = set(candidate.lower().split())
-        reference_words = set(reference.lower().split())
-        
-        if not reference_words:
-            return 0.0
-        
-        # Jaccard similarity (intersection over union)
-        intersection = len(candidate_words & reference_words)
-        union = len(candidate_words | reference_words)
-        
-        if union == 0:
-            return 0.0
-        
-        return intersection / union
-    
-    def score(self, data: List[Tuple[str, str, str]]) -> float:
-        """
-        Score a list of (prompt, model_continuation, correct_continuation) tuples.
-        
-        Args:
-            data: List of tuples (prompt, model_continuation, correct_continuation)
-            
-        Returns:
-            Average similarity score across all examples
-        """
-        if not data:
-            return 0.0
-        
-        scores = []
-        for prompt, model_continuation, correct_continuation in data:
-            similarity = self._simple_similarity(model_continuation, correct_continuation)
-            
-            # Add some base score and small random noise for realism
-            final_score = self.base_score + (0.7 * similarity) + (self.noise_factor * (hash(model_continuation) % 100) / 1000)
-            final_score = max(0.0, min(1.0, final_score))  # Clamp to [0, 1]
-            scores.append(final_score)
-        
-        return sum(scores) / len(scores)
-
-
-def plot_win_rate_vs_data_amount(
-    data_amounts: List[float], 
-    win_rates: List[float], 
-    title: str = "BrainLLM Win Rate vs Amount of Neurological Data",
-) -> None:
-    fig, ax = plt.subplots(figsize=(10, 6))
-    ax.plot(data_amounts, win_rates, 'bo-', linewidth=2, markersize=8, label='BrainLLM vs Baselines')
-    ax.axhline(y=0.5, color='red', linestyle='--', linewidth=2, alpha=0.7, label='Control (Chance Level)')
-    ax.set_xlabel('Amount of neurological data', fontsize=12)
-    ax.set_ylabel('Win rate', fontsize=12)
-    ax.set_title(title, fontsize=14, fontweight='bold')
-    ax.set_ylim(0, 1)
-    ax.grid(True, alpha=0.3)
-    ax.legend()
-    plt.tight_layout()
-    plt.show()
-
-
-class SimpleGPT2Dataset(Dataset):
-    """Simple PyTorch dataset for fine-tuning GPT-2 on prompt-continuation pairs."""
-    
-    def __init__(self, prompts: List[np.ndarray], continuations: List[np.ndarray], tokenizer: GPT2Tokenizer, max_length: int = 128):
-        """
-        Initialize the dataset.
-        
-        Args:
-            prompts: List of prompt word arrays
-            continuations: List of continuation word arrays
-            tokenizer: GPT2 tokenizer
-            max_length: Maximum sequence length
-        """
-        self.tokenizer = tokenizer
-        self.max_length = max_length
-        self.data = []
-        
-        # Set padding token
-        tokenizer.pad_token = tokenizer.eos_token
-        
-        for prompt, continuation in zip(prompts, continuations):
-            # Convert word arrays to strings
-            prompt_text = " ".join(str(word) for word in prompt)
-            continuation_text = " ".join(str(word) for word in continuation)
-            full_text = prompt_text + " " + continuation_text
-            
-            # Tokenize the full text
-            encoding = tokenizer(
-                full_text,
-                truncation=True,
-                max_length=max_length,
-                padding="max_length",
-                return_tensors="pt"
-            )
-            
-            # Create labels (same as input_ids for language modeling)
-            labels = encoding["input_ids"].clone()
-            
-            # Mask out the prompt part in labels (only train on continuation)
-            prompt_encoding = tokenizer(
-                prompt_text,
-                truncation=True,
-                max_length=max_length,
-                add_special_tokens=False
-            )
-            prompt_length = len(prompt_encoding["input_ids"])
-            labels[0, :prompt_length] = -100  # -100 is ignored in loss calculation
-            
-            self.data.append({
-                "input_ids": encoding["input_ids"].squeeze(),
-                "attention_mask": encoding["attention_mask"].squeeze(),
-                "labels": labels.squeeze()
-            })
-    
-    def __len__(self):
-        return len(self.data)
-    
-    def __getitem__(self, idx):
-        return self.data[idx]
 
 
 class BrainLLMTrainingDataset(Dataset):
@@ -456,12 +199,9 @@ class BrainLLMTrainingDataset(Dataset):
         return len(self.prompts)
 
     def __getitem__(self, idx):
-        prompt_text = " ".join(str(word) for word in self.prompts[idx])
-        continuation_text = " ".join(str(word) for word in self.continuations[idx])
-        
-        # Tokenize with padding and truncation
+        # Tokenize texts
         prompt_tokens = self.tokenizer(
-            prompt_text, 
+            self.prompts[idx], 
             return_tensors="pt", 
             add_special_tokens=False,
             padding="max_length",
@@ -469,7 +209,7 @@ class BrainLLMTrainingDataset(Dataset):
             max_length=self.max_length
         )
         continuation_tokens = self.tokenizer(
-            continuation_text, 
+            self.continuations[idx], 
             return_tensors="pt", 
             add_special_tokens=False,
             padding="max_length", 
@@ -482,68 +222,236 @@ class BrainLLMTrainingDataset(Dataset):
             "prompt_attention_mask": prompt_tokens.attention_mask.squeeze(),
             "continuation_tokens": continuation_tokens.input_ids.squeeze(),
             "continuation_attention_mask": continuation_tokens.attention_mask.squeeze(),
-            "brain_data": torch.tensor(self.brain_data[idx], dtype=torch.float32),
-            "brain_seq_len": len(self.brain_data[idx])  # Store actual sequence length
+            "prompt_brain_data": torch.tensor(self.brain_data[idx]['prompt'], dtype=torch.float32),
+            "continuation_brain_data": torch.tensor(self.brain_data[idx]['continuation'], dtype=torch.float32),
         }
 
 
 def custom_collate_fn(batch):
     """
     Custom collate function to handle variable-length brain data sequences.
-    Pads brain data sequences to the same length within the batch.
     """
-    # Get the maximum brain sequence length in this batch
-    max_brain_len = max(item["brain_seq_len"] for item in batch)
+    # Get the maximum brain sequence lengths in this batch
+    max_prompt_brain_len = max(item["prompt_brain_data"].shape[0] for item in batch)
+    max_continuation_brain_len = max(item["continuation_brain_data"].shape[0] for item in batch)
     
     collated_batch = {}
     
+    # Stack token tensors
     for key in ["prompt_tokens", "prompt_attention_mask", "continuation_tokens", "continuation_attention_mask"]:
         collated_batch[key] = torch.stack([item[key] for item in batch])
     
     # Handle brain data with padding
-    brain_data_list = []
-    brain_attention_masks = []
+    prompt_brain_list = []
+    prompt_brain_masks = []
+    continuation_brain_list = []
+    continuation_brain_masks = []
     
     for item in batch:
-        brain_data = item["brain_data"]
-        seq_len = item["brain_seq_len"]
+        # Pad prompt brain data
+        prompt_brain = item["prompt_brain_data"]
+        prompt_len = prompt_brain.shape[0]
+        if prompt_len < max_prompt_brain_len:
+            padding_shape = (max_prompt_brain_len - prompt_len,) + prompt_brain.shape[1:]
+            padding = torch.zeros(padding_shape, dtype=prompt_brain.dtype)
+            prompt_brain = torch.cat([prompt_brain, padding], dim=0)
+        prompt_brain_list.append(prompt_brain)
         
-        # Pad brain data to max_brain_len
-        if seq_len < max_brain_len:
-            padding_shape = (max_brain_len - seq_len,) + brain_data.shape[1:]
-            padding = torch.zeros(padding_shape, dtype=brain_data.dtype)
-            brain_data = torch.cat([brain_data, padding], dim=0)
-        
-        brain_data_list.append(brain_data)
-        
-        # Create attention mask for brain data (1 for real data, 0 for padding)
-        brain_attention_mask = torch.cat([
-            torch.ones(seq_len),
-            torch.zeros(max_brain_len - seq_len)
+        # Create attention mask for prompt brain data
+        prompt_brain_mask = torch.cat([
+            torch.ones(prompt_len),
+            torch.zeros(max_prompt_brain_len - prompt_len)
         ])
-        brain_attention_masks.append(brain_attention_mask)
+        prompt_brain_masks.append(prompt_brain_mask)
+        
+        # Pad continuation brain data
+        cont_brain = item["continuation_brain_data"]
+        cont_len = cont_brain.shape[0]
+        if cont_len < max_continuation_brain_len:
+            padding_shape = (max_continuation_brain_len - cont_len,) + cont_brain.shape[1:]
+            padding = torch.zeros(padding_shape, dtype=cont_brain.dtype)
+            cont_brain = torch.cat([cont_brain, padding], dim=0)
+        continuation_brain_list.append(cont_brain)
+        
+        # Create attention mask for continuation brain data
+        cont_brain_mask = torch.cat([
+            torch.ones(cont_len),
+            torch.zeros(max_continuation_brain_len - cont_len)
+        ])
+        continuation_brain_masks.append(cont_brain_mask)
     
-    collated_batch["brain_data"] = torch.stack(brain_data_list)
-    collated_batch["brain_attention_mask"] = torch.stack(brain_attention_masks)
+    collated_batch["prompt_brain_data"] = torch.stack(prompt_brain_list)
+    collated_batch["prompt_brain_attention_mask"] = torch.stack(prompt_brain_masks)
+    collated_batch["continuation_brain_data"] = torch.stack(continuation_brain_list)
+    collated_batch["continuation_brain_attention_mask"] = torch.stack(continuation_brain_masks)
     
     return collated_batch
 
 
+def compute_loss(batch, brain_adapter, g_model, tokenizer, device):
+    """
+    Compute the training loss for a batch.
+    """
+    # Move batch to device
+    prompt_tokens = batch["prompt_tokens"].to(device)
+    prompt_attention_mask = batch["prompt_attention_mask"].to(device)
+    continuation_tokens = batch["continuation_tokens"].to(device)
+    continuation_attention_mask = batch["continuation_attention_mask"].to(device)
+    prompt_brain_data = batch["prompt_brain_data"].to(device)
+    prompt_brain_attention_mask = batch["prompt_brain_attention_mask"].to(device)
+    continuation_brain_data = batch["continuation_brain_data"].to(device)
+    continuation_brain_attention_mask = batch["continuation_brain_attention_mask"].to(device)
+    
+    # Get brain embeddings for prompt
+    prompt_brain_embeddings = brain_adapter(prompt_brain_data)
+    
+    # Get prompt token embeddings
+    prompt_embeddings = g_model.transformer.wte(prompt_tokens)
+    
+    # For training, we also need continuation brain embeddings (except last token)
+    continuation_brain_embeddings = brain_adapter(continuation_brain_data)
+    
+    # Teacher forcing: use all but the last continuation token as input
+    continuation_embeddings = g_model.transformer.wte(continuation_tokens)
+    continuation_input = continuation_embeddings[:, :-1, :]
+    continuation_input_mask = continuation_attention_mask[:, :-1]
+    continuation_brain_input = continuation_brain_embeddings[:, :-1, :]
+    continuation_brain_input_mask = continuation_brain_attention_mask[:, :-1]
+    
+    # Combine all embeddings: prompt_brain + prompt_tokens + continuation_brain[:-1] + continuation_tokens[:-1]
+    combined_embeddings = torch.cat([
+        prompt_brain_embeddings, 
+        prompt_embeddings,
+        continuation_brain_input,
+        continuation_input
+    ], dim=1)
+    
+    combined_attention_mask = torch.cat([
+        prompt_brain_attention_mask,
+        prompt_attention_mask,
+        continuation_brain_input_mask,
+        continuation_input_mask
+    ], dim=1)
+    
+    # Forward pass through GPT-2
+    outputs = g_model(
+        inputs_embeds=combined_embeddings,
+        attention_mask=combined_attention_mask
+    )
+    
+    # Get logits for the continuation part only
+    # We want to predict from the brain+prompt context
+    context_len = prompt_brain_embeddings.size(1) + prompt_embeddings.size(1) + continuation_brain_input.size(1)
+    continuation_logits = outputs.logits[:, context_len:, :]
+    
+    # Targets are the continuation tokens (shifted by 1)
+    continuation_targets = continuation_tokens[:, 1:].contiguous()
+    
+    # Calculate loss
+    loss_fct = torch.nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
+    loss = loss_fct(
+        continuation_logits.reshape(-1, continuation_logits.size(-1)),
+        continuation_targets.reshape(-1)
+    )
+    
+    return loss
+
+
+def generate_from_brain(
+    prompt_brain_data: torch.Tensor,
+    prompt_text: str,
+    brain_adapter: nn.Module,
+    model: GPT2LMHeadModel,
+    tokenizer: GPT2Tokenizer,
+    device: torch.device,
+    max_new_tokens: int = 20,
+    temperature: float = 0.8
+) -> str:
+    """
+    Generate text continuation from brain data and text prompt.
+    """
+    brain_adapter.eval()
+    model.eval()
+    
+    with torch.no_grad():
+        # Move to device
+        prompt_brain_data = prompt_brain_data.to(device)
+        
+        # Get brain embeddings
+        if len(prompt_brain_data.shape) == 4:  # Add batch dimension if needed
+            prompt_brain_data = prompt_brain_data.unsqueeze(0)
+        brain_embeddings = brain_adapter(prompt_brain_data)
+        
+        # Tokenize prompt
+        prompt_tokens = tokenizer(
+            prompt_text,
+            return_tensors="pt",
+            add_special_tokens=False
+        ).input_ids.to(device)
+        
+        # Get prompt embeddings
+        prompt_embeddings = model.transformer.wte(prompt_tokens)
+        
+        # Combine embeddings
+        combined_embeddings = torch.cat([brain_embeddings, prompt_embeddings], dim=1)
+        
+        # Generate
+        outputs = model.generate(
+            inputs_embeds=combined_embeddings,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            do_sample=True,
+            pad_token_id=tokenizer.pad_token_id
+        )
+        
+        # Decode only the generated part
+        generated_tokens = outputs[0, combined_embeddings.size(1):]
+        generated_text = tokenizer.decode(generated_tokens, skip_special_tokens=True)
+        
+    return generated_text
+
+
+def evaluate_model(
+    dataloader: DataLoader,
+    brain_adapter: nn.Module,
+    g_model: GPT2LMHeadModel,
+    tokenizer: GPT2Tokenizer,
+    device: torch.device
+) -> float:
+    """
+    Evaluate the model and return average loss.
+    """
+    brain_adapter.eval()
+    g_model.eval()
+    
+    total_loss = 0
+    num_batches = 0
+    
+    with torch.no_grad():
+        for batch in dataloader:
+            loss = compute_loss(batch, brain_adapter, g_model, tokenizer, device)
+            total_loss += loss.item()
+            num_batches += 1
+    
+    return total_loss / num_batches if num_batches > 0 else 0
+
+
 def train_brain_adapter(
-    dataset: BrainLLMDataset,
+    train_dataset: BrainLLMDataset,
+    val_dataset: BrainLLMDataset,
     tokenizer: GPT2Tokenizer,
     g_model: GPT2LMHeadModel,
     brain_adapter: BrainAdapter,
-    num_epochs: int = 3,
+    num_epochs: int = 5,
     batch_size: int = 4,
-    learning_rate: float = 5e-5,
+    learning_rate: float = 5e-4,
     max_length: int = 128
-) -> List[float]:
+) -> Tuple[List[float], List[float]]:
     """
     Train the BrainAdapter while keeping the GPT-2 model frozen.
     
     Returns:
-        List[float]: List of loss values for plotting
+        Tuple[List[float], List[float]]: Training and validation losses
     """
     # Freeze GPT-2 model parameters
     for param in g_model.parameters():
@@ -557,199 +465,92 @@ def train_brain_adapter(
     g_model.to(device)
     brain_adapter.to(device)
     
-    # Training loop
-    g_model.eval()  # GPT-2 in evaluation mode
-    brain_adapter.train() # BrainAdapter in training mode
+    # Create DataLoaders
+    train_torch_dataset = BrainLLMTrainingDataset(train_dataset, tokenizer, max_length)
+    train_dataloader = DataLoader(train_torch_dataset, batch_size=batch_size, shuffle=True, collate_fn=custom_collate_fn)
     
-    # Create a DataLoader with custom collate function for batching
-    train_dataset = BrainLLMTrainingDataset(dataset, tokenizer, max_length)
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=custom_collate_fn)
+    val_torch_dataset = BrainLLMTrainingDataset(val_dataset, tokenizer, max_length)
+    val_dataloader = DataLoader(val_torch_dataset, batch_size=batch_size, shuffle=False, collate_fn=custom_collate_fn)
     
     # Track losses
-    losses = []
+    train_losses = []
+    val_losses = []
     
+    # Training loop
     for epoch in range(num_epochs):
+        # Training
+        brain_adapter.train()
+        g_model.eval()
+        
+        epoch_train_losses = []
         progress_bar = tqdm(train_dataloader, desc=f"Epoch {epoch + 1}/{num_epochs}")
         
         for batch in progress_bar:
-            # Move batch to device
-            prompt_tokens = batch["prompt_tokens"].to(device)
-            prompt_attention_mask = batch["prompt_attention_mask"].to(device)
-            continuation_tokens = batch["continuation_tokens"].to(device)
-            continuation_attention_mask = batch["continuation_attention_mask"].to(device)
-            brain_data = batch["brain_data"].to(device)
-            brain_attention_mask = batch["brain_attention_mask"].to(device)
-            
-            # Get brain embeddings for all tokens in the sequence
-            # brain_data has shape (batch_size, seq_len, 1016, 2, 3, 1)
-            # brain_embeddings will have shape (batch_size, seq_len, 768)
-            brain_embeddings = brain_adapter(brain_data)
-            
-            # Get prompt embeddings
-            prompt_embeddings = g_model.transformer.wte(prompt_tokens)
-            
-            # Combine embeddings: brain embeddings + prompt embeddings
-            # This is the input context from which we want to predict continuation
-            combined_embeddings = torch.cat([brain_embeddings, prompt_embeddings], dim=1)
-            
-            # Create attention mask for the combined input
-            combined_attention_mask = torch.cat([brain_attention_mask, prompt_attention_mask], dim=1)
-            
-            # Forward pass through GPT-2 to get logits
-            outputs = g_model(
-                inputs_embeds=combined_embeddings, 
-                attention_mask=combined_attention_mask
-            )
-            
-            # Get logits from the combined context
-            logits = outputs.logits  # Shape: (batch_size, context_seq_len, vocab_size)
-            
-            # For training, we want to predict continuation tokens autoregressively
-            # We'll use teacher forcing: feed the context + partial continuation to predict next tokens
-            
-            # Create the full training sequence: [brain + prompt + continuation[:-1]]
-            continuation_embeddings = g_model.transformer.wte(continuation_tokens)
-            
-            # Use all but the last continuation token as input
-            continuation_input = continuation_embeddings[:, :-1, :]  # Remove last token
-            continuation_input_mask = continuation_attention_mask[:, :-1]  # Remove last mask
-            
-            # Full input for training: brain + prompt + continuation[:-1]
-            full_input_embeddings = torch.cat([combined_embeddings, continuation_input], dim=1)
-            full_attention_mask = torch.cat([combined_attention_mask, continuation_input_mask], dim=1)
-            
-            # Forward pass with full sequence
-            full_outputs = g_model(
-                inputs_embeds=full_input_embeddings,
-                attention_mask=full_attention_mask
-            )
-            
-            # Get logits for the continuation part only
-            context_len = combined_embeddings.size(1)
-            continuation_logits = full_outputs.logits[:, context_len:, :]  # Only continuation logits
-            
-            # Targets are the continuation tokens (shifted by 1 due to teacher forcing)
-            continuation_targets = continuation_tokens[:, 1:].contiguous()  # Remove first token
-            
-            # Flatten for loss calculation
-            loss_fct = torch.nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id)
-            loss = loss_fct(
-                continuation_logits.reshape(-1, continuation_logits.size(-1)),
-                continuation_targets.reshape(-1)
-            )
+            loss = compute_loss(batch, brain_adapter, g_model, tokenizer, device)
             
             # Backward pass
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             
-            losses.append(loss.item())
+            epoch_train_losses.append(loss.item())
             progress_bar.set_postfix({"loss": loss.item()})
-    
-    return losses
-
-
-def train_gpt2_simple(
-    dataset: BrainLLMDataset,
-    tokenizer: GPT2Tokenizer,
-    model: GPT2LMHeadModel,
-    num_epochs: int = 3,
-    batch_size: int = 4,
-    learning_rate: float = 5e-5
-) -> List[float]:
-    """
-    Simple GPT-2 fine-tuning function with loss tracking.
-    
-    Args:
-        dataset: BrainLLMDataset with prompts and continuations
-        tokenizer: GPT2 tokenizer
-        model: GPT2 model to fine-tune
-        num_epochs: Number of training epochs
-        batch_size: Batch size for training
-        learning_rate: Learning rate
         
-    Returns:
-        List of loss values for plotting
-    """
-    # Create PyTorch dataset and dataloader
-    train_dataset = SimpleGPT2Dataset(dataset.prompts, dataset.continuations, tokenizer)
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    
-    # Set up optimizer
-    optimizer = AdamW(model.parameters(), lr=learning_rate)
-    
-    # Training device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
-    
-    # Track losses
-    losses = []
-    
-    # Training loop
-    model.train()
-    for epoch in range(num_epochs):
-        epoch_losses = []
-        progress_bar = tqdm(train_dataloader, desc=f"Epoch {epoch + 1}/{num_epochs}")
+        # Calculate average training loss
+        avg_train_loss = sum(epoch_train_losses) / len(epoch_train_losses)
+        train_losses.extend(epoch_train_losses)
         
-        for batch in progress_bar:
-            # Move batch to device
-            input_ids = batch["input_ids"].to(device)
-            attention_mask = batch["attention_mask"].to(device)
-            labels = batch["labels"].to(device)
+        # Validation
+        avg_val_loss = evaluate_model(val_dataloader, brain_adapter, g_model, tokenizer, device)
+        val_losses.append(avg_val_loss)
+        
+        print(f"Epoch {epoch + 1}: Train Loss = {avg_train_loss:.4f}, Val Loss = {avg_val_loss:.4f}")
+        
+        # Generate a sample
+        if len(val_dataset.brain_data) > 0:
+            sample_idx = 0
+            sample_brain = torch.tensor(val_dataset.brain_data[sample_idx]['prompt'], dtype=torch.float32)
+            sample_prompt = val_dataset.prompts[sample_idx]
+            sample_continuation = val_dataset.continuations[sample_idx]
             
-            # Forward pass
-            outputs = model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                labels=labels
+            generated = generate_from_brain(
+                sample_brain, sample_prompt, brain_adapter, g_model, tokenizer, device
             )
             
-            loss = outputs.loss
-            epoch_losses.append(loss.item())
-            
-            # Backward pass
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            
-            # Update progress bar
-            progress_bar.set_postfix({"loss": loss.item()})
-        
-        # Store average loss for this epoch
-        avg_epoch_loss = sum(epoch_losses) / len(epoch_losses)
-        losses.extend(epoch_losses)  # Keep all batch losses for detailed plotting
-        print(f"Epoch {epoch + 1} average loss: {avg_epoch_loss:.4f}")
+            print(f"\nSample generation:")
+            print(f"Prompt: {sample_prompt}")
+            print(f"Generated: {generated}")
+            print(f"Actual: {sample_continuation}\n")
     
-    return losses
+    return train_losses, val_losses
 
 
-def plot_training_loss(losses: List[float], batch_size: int = 4) -> None:
+def plot_losses(train_losses: List[float], val_losses: List[float], batch_size: int = 4) -> None:
     """
-    Plot the training loss curve.
-    
-    Args:
-        losses: List of loss values
-        batch_size: Batch size used in training
+    Plot training and validation loss curves.
     """
-    if not losses:
-        print("No losses to plot!")
-        return
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
     
-    plt.figure(figsize=(10, 6))
+    # Plot training loss (per batch)
+    ax1.plot(train_losses, alpha=0.7, linewidth=1)
+    ax1.set_xlabel('Training Step')
+    ax1.set_ylabel('Loss')
+    ax1.set_title('Training Loss (per batch)')
+    ax1.grid(True, alpha=0.3)
     
-    # Plot raw losses
-    plt.plot(losses, alpha=0.7, linewidth=1, label='Training loss')
+    # Plot validation loss (per epoch)
+    ax2.plot(val_losses, 'o-', linewidth=2, markersize=8)
+    ax2.set_xlabel('Epoch')
+    ax2.set_ylabel('Loss')
+    ax2.set_title('Validation Loss')
+    ax2.grid(True, alpha=0.3)
     
-    plt.xlabel('Training Step')
-    plt.ylabel('Loss')
-    plt.title('BrainAdapter Training Loss Curve')
-    plt.grid(True, alpha=0.3)
-    plt.legend()
     plt.tight_layout()
     plt.show()
 
 
 if __name__ == "__main__":
+    # Load experiment
     experiment = create_experiment("perceived_speech", "flow2", use_common_channels=True)
     
     pipeline = ProcessingPipeline([])
@@ -763,44 +564,74 @@ if __name__ == "__main__":
     print(f"Validation set X shape: {datasets.val.X.shape}, y shape: {datasets.val.y.shape}")
     print(f"Test set X shape: {datasets.test.X.shape}, y shape: {datasets.test.y.shape}")
     
-    #TODO: there's something not good about having a TrainTestSplit BEFORE i convert to a BrainLLMDataset. Silly. Needs refactor. !!!
-    # but actually the thing is that we need to know the session by session split?
-    brainllm_dataset = convert_dataset_to_brainllm_format(datasets.train)
-
-    for _ in range(30):
-        ix = np.random.randint(len(brainllm_dataset.prompts))
-        prompt = brainllm_dataset.prompts[ix]
-        continuation = brainllm_dataset.continuations[ix]
-        print(prompt)
-        print("---------->")
-        print(continuation)
-        print("****************")
-
-    # Load tokenizer and model for language modeling
-    model = GPT2LMHeadModel.from_pretrained('gpt2')
-    tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+    # Convert to BrainLLM format
+    train_brainllm = convert_dataset_to_brainllm_format(datasets.train)
+    val_brainllm = convert_dataset_to_brainllm_format(datasets.val)
+    test_brainllm = convert_dataset_to_brainllm_format(datasets.test)
     
-    # Instantiate the BrainAdapter
-    input_shape = (1016, 2, 3, 1)  # Example shape from your notebook
+    print(f"\nBrainLLM datasets created:")
+    print(f"Train: {len(train_brainllm.prompts)} samples")
+    print(f"Val: {len(val_brainllm.prompts)} samples")
+    print(f"Test: {len(test_brainllm.prompts)} samples")
+    
+    # Show a few examples
+    print("\nExample samples:")
+    for i in range(min(3, len(train_brainllm.prompts))):
+        print(f"\nExample {i+1}:")
+        print(f"Prompt: {train_brainllm.prompts[i]}")
+        print(f"Continuation: {train_brainllm.continuations[i]}")
+    
+    # Load tokenizer and model
+    tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+    model = GPT2LMHeadModel.from_pretrained('gpt2')
+    
+    # Initialize BrainAdapter
+    input_shape = (1016, 2, 3, 1)
     gpt2_embedding_size = model.config.n_embd  # 768 for standard GPT-2
     brain_adapter = BrainAdapter(input_shape=input_shape, output_size=gpt2_embedding_size)
     
-    # Print the model architecture
     print("\nBrainAdapter Model Architecture:")
     print(brain_adapter)
-
-    # Train the BrainAdapter
+    print(f"\nTotal parameters: {sum(p.numel() for p in brain_adapter.parameters()):,}")
+    
+    # Train the model
     print("\nTraining BrainAdapter...")
-    losses = train_brain_adapter(
-        dataset=brainllm_dataset,
+    train_losses, val_losses = train_brain_adapter(
+        train_dataset=train_brainllm,
+        val_dataset=val_brainllm,
         tokenizer=tokenizer,
         g_model=model,
         brain_adapter=brain_adapter,
-        num_epochs=1,
-        learning_rate=1e-4
+        num_epochs=5,
+        batch_size=4,
+        learning_rate=5e-4
     )
-    print("BrainAdapter training finished.")
     
-    # Plot the loss curve
-    plot_training_loss(losses)
+    # Plot losses
+    plot_losses(train_losses, val_losses)
     
+    # Final evaluation on test set
+    print("\nFinal evaluation on test set:")
+    test_torch_dataset = BrainLLMTrainingDataset(test_brainllm, tokenizer, max_length=128)
+    test_dataloader = DataLoader(test_torch_dataset, batch_size=4, shuffle=False, collate_fn=custom_collate_fn)
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    test_loss = evaluate_model(test_dataloader, brain_adapter, model, tokenizer, device)
+    print(f"Test Loss: {test_loss:.4f}")
+    
+    # Generate some final examples
+    print("\nFinal generation examples:")
+    brain_adapter.eval()
+    for i in range(min(5, len(test_brainllm.prompts))):
+        sample_brain = torch.tensor(test_brainllm.brain_data[i]['prompt'], dtype=torch.float32)
+        sample_prompt = test_brainllm.prompts[i]
+        sample_continuation = test_brainllm.continuations[i]
+        
+        generated = generate_from_brain(
+            sample_brain, sample_prompt, brain_adapter, model, tokenizer, device
+        )
+        
+        print(f"\nExample {i+1}:")
+        print(f"Prompt: {sample_prompt}")
+        print(f"Generated: {generated}")
+        print(f"Actual: {sample_continuation}")
