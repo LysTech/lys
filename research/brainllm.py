@@ -778,6 +778,7 @@ if __name__ == "__main__":
 
     # Load tokenizer and model for language modeling
     model = GPT2LMHeadModel.from_pretrained('gpt2')
+    tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     
     # Instantiate the BrainAdapter
     input_shape = (1016, 2, 3, 1)  # Example shape from your notebook

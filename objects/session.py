@@ -61,7 +61,7 @@ def _load_npz_or_error(path: Path, filename: str, required: bool = True) -> Opti
     return dict(np.load(file_path, allow_pickle=True))
 
 
-def create_session(path: Path):
+def create_session(path: Path, use_common_channels=False):
     """
     #TODO: revisit?
     notes: i'm not sure this is good architecture/code principles:
@@ -81,6 +81,7 @@ def create_session(path: Path):
 
     Parameters:
         path (Path): Path to the session directory containing the .npz files and protocol.
+        use_common_channels (bool): If True, use 'raw_channel_data_common_channels.npz' instead of 'raw_channel_data.npz'.
 
     Returns:
         Session: A fully constructed Session object with all loaded data.
@@ -92,7 +93,10 @@ def create_session(path: Path):
     patient = Patient.from_name(extract_patient_from_path(path))
     protocol = Protocol.from_session_path(path)
     jacobians = load_jacobians_from_session_dir(path)
-    raw_npz = _load_npz_or_error(path, "raw_channel_data.npz", required=True)
+    
+    # Choose the correct filename based on use_common_channels parameter
+    raw_data_filename = "raw_channel_data_common_channels.npz" if use_common_channels else "raw_channel_data.npz"
+    raw_npz = _load_npz_or_error(path, raw_data_filename, required=True)
     processed_npz = _load_npz_or_error(path, "processed_channel_data.npz", required=False)
     physio_npz = _load_npz_or_error(path, "physio_data.npz", required=False)
 

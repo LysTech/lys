@@ -17,8 +17,8 @@ class Experiment:
         return Experiment(f"{self.name}_filtered", self.scanner, filtered_sessions)
 
 
-def create_experiment(experiment_name, scanner_name):
+def create_experiment(experiment_name, scanner_name, use_common_channels=False):
     paths = get_session_paths(experiment_name, scanner_name)
-    sessions = [create_session(p) for p in paths]
+    sessions = [create_session(p, use_common_channels=use_common_channels) for p in paths]
     return Experiment(experiment_name, scanner_name, sessions)
 
