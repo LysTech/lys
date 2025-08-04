@@ -777,8 +777,6 @@ if __name__ == "__main__":
         print("****************")
 
     # Load tokenizer and model for language modeling
-    token = "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" #only need this for first use, set token=token in .from_pretrained()
-    tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
     model = GPT2LMHeadModel.from_pretrained('gpt2')
     
     # Instantiate the BrainAdapter
