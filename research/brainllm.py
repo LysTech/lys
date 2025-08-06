@@ -26,7 +26,7 @@ class BrainAdapter(nn.Module):
         """
         Initialize the BrainAdapter.
         Args:
-            input_shape (Tuple[int, ...]): The shape of brain data for a single token, e.g., (1016, 2, 3, 1).
+            input_shape (Tuple[int, ...]): The shape of brain data for a single timestamp, e.g., (1016, 2, 3, 1): 1016 channels, 2 wavelegths, 3 moments, and a stacking dimension that i'm not sure we need.
             output_size (int): The size of the output embedding, e.g., 768 for GPT-2.
         """
         super(BrainAdapter, self).__init__()
@@ -36,7 +36,7 @@ class BrainAdapter(nn.Module):
         # Flatten the spatial dimensions (2, 3, 1) and use 1D convolutions on the time dimension
         spatial_features = input_shape[1] * input_shape[2] * input_shape[3]  # 2 * 3 * 1 = 6
         
-        # Use 1D convolutions along the time dimension (1016)
+        # Use 1D convolutions along the channel dimension (1016)
         self.conv_layers = nn.Sequential(
             nn.Conv1d(in_channels=spatial_features, out_channels=32, kernel_size=3, padding=1),
             nn.ReLU(),
@@ -46,10 +46,10 @@ class BrainAdapter(nn.Module):
             nn.MaxPool1d(kernel_size=2),
             nn.Conv1d(in_channels=64, out_channels=128, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.AdaptiveMaxPool1d(output_size=1)  # Adaptive pooling to get fixed output size
+            nn.AdaptiveMaxPool1d(output_size=1)  # I guess this gives output size (128,)?
         )
 
-        # Fully connected layers to map to the embedding space
+        # FC layers from 128 -> 512 -> 768 (the GPT2 embedding dimension)
         self.fc_layers = nn.Sequential(
             nn.Linear(128, 512),
             nn.ReLU(),
@@ -62,7 +62,7 @@ class BrainAdapter(nn.Module):
         Forward pass of the BrainAdapter.
         Args:
             x (torch.Tensor): Input brain data tensor with shape (batch_size, seq_len, 1016, 2, 3, 1)
-                             OR (batch_size, 1016, 2, 3, 1) for single tokens
+                             OR (batch_size, 1016, 2, 3, 1) for single tokens <-- that doesn't seem right, surely we'd get seq_len = 1 for a single token? fix this. it's probably like this for a reason (like outside of training we don't have the seq len or something, let's change that instead of having this ugly if/else here)
         Returns:
             torch.Tensor: Output tensor with shape (batch_size, seq_len, output_size)
                          OR (batch_size, output_size) for single tokens
@@ -230,6 +230,7 @@ class BrainLLMTrainingDataset(Dataset):
 def custom_collate_fn(batch):
     """
     Custom collate function to handle variable-length brain data sequences.
+    #TODO: I'm not sure what collate means, let's make this a bit clearer with an example
     """
     # Get the maximum brain sequence lengths in this batch
     max_prompt_brain_len = max(item["prompt_brain_data"].shape[0] for item in batch)
@@ -602,7 +603,7 @@ if __name__ == "__main__":
         tokenizer=tokenizer,
         g_model=model,
         brain_adapter=brain_adapter,
-        num_epochs=5,
+        num_epochs=3,
         batch_size=4,
         learning_rate=5e-4
     )
