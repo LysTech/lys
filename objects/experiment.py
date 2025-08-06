@@ -18,7 +18,9 @@ class Experiment:
 
 
 def create_experiment(experiment_name, scanner_name):
-    """Create an experiment with standard channel configuration.
+    """Create an experiment with standard channel configuration: each session has the data from each channel that was
+        recorded in this session (with the Flow2 this can change session to session if you don't use the raw TD-fNIRS
+        data, which we are currently not. see: https://docs.kernel.com/docs/data-export-pipelines)
     
     Args:
         experiment_name: Name of the experiment
