@@ -454,7 +454,7 @@ We want to be able to record Flow2 data while someone is listening to any audio.
 3. Put them in the right place in our data folder so that the code knows where to find it
 4. Run `data_recording/perceived_speech.py`, and use the GUI to click `play`.
 
-First you need to get an `.mp3` file. With youtube, you can just use [an online tool like this](https://en1.savefrom.net/1-youtube-video-downloader-8jH/) to get the `mp3`. Audible is a little more tricky, instructions a bit below.
+First you need to get an `.mp3` file. With youtube, you can just use [an online tool like this one](https://ytmp3.cx/) to get the `mp3`. Audible is a little more tricky, instructions a bit below.
 
 This is the expected data structure:
 
@@ -470,6 +470,66 @@ Where for example `dwarkesh_kotkin` contains all 15-minute chunks created from t
   <img src="assets/ps_audio_gui.png" alt="GUI for perceived_speech.py" width="600"/>
 </p>
 
+So, once you've got an mp3 file called `my_podcast_name` (inside of `/data/audio/assets`) you can then run `./data_recording/mp3_to_15min_chunks.sh my_podcast_name`. This will create sub-folder named `my_podcast_name`, and sub-sub-folders for each 15 minute chunk.
+
+(n.b. you may have to do `chmod +x mp3_to_15min_chunks.sh` if you can't run it, and same for `transcribe.sh` -- `chmod` is for unix based systems, not sure for Windows).
+
+Then run `data_recording/transcribe.sh my_podcast_name`. This will create transcript files that look a bit like the below example below.
+
+```
+{
+	"systeminfo": "WHISPER : COREML = 0 | OPENVINO = 0 | Metal : EMBED_LIBRARY = 1 | CPU : NEON = 1 | ARM_FMA = 1 | FP16_VA = 1 | MATMUL_INT8 = 1 | DOTPROD = 1 | ACCELERATE = 1 | REPACK = 1 | ",
+	"model": {
+		"type": "large",
+		"multilingual": true,
+		"vocab": 51866,
+		"audio": {
+			"ctx": 1500,
+			"state": 1280,
+			"head": 20,
+			"layer": 32
+		},
+		"text": {
+			"ctx": 448,
+			"state": 1280,
+			"head": 20,
+			"layer": 4
+		},
+		"mels": 128,
+		"ftype": 1
+	},
+	"params": {
+		"model": "/Users/thomasrialan/Documents/code/whisper.cpp/models/ggml-large-v3-turbo.bin",
+		"language": "en",
+		"translate": false
+	},
+	"result": {
+		"language": "en"
+	},
+	"transcription": [
+		{
+			"timestamps": {
+				"from": "00:00:00,000",
+				"to": "00:00:00,060"
+			},
+			"offsets": {
+				"from": 0,
+				"to": 60
+			},
+			"text": ""
+		},
+		{
+			"timestamps": {
+				"from": "00:00:00,060",
+				"to": "00:00:00,220"
+			},
+			"offsets": {
+				"from": 60,
+				"to": 220
+			},
+			"text": " people"
+		},
+```
 
 
 ### Using Audible
