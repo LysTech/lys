@@ -27,6 +27,9 @@ TODO:
   - [Flow2](#flow2)
 
 ## Virtual environment
+
+N.B. you don't need to do this right now if are confused / can't be be bothered. We can do together in the future.
+
 We want to all have the same environment, for now we don't use docker or conda, but we may switch to conda once we have multi-language code. For now we just make a clean virtual environment and share a `requirements.txt` file. 
 
 This will create the virtual environment in linux/mac:
