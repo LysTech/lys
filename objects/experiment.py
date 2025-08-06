@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import List
-from lys.objects.session import create_session, Session
+from lys.objects.session import create_session, create_session_with_common_channels, Session
 from lys.utils.paths import get_session_paths
 
 @dataclass
@@ -18,7 +18,33 @@ class Experiment:
 
 
 def create_experiment(experiment_name, scanner_name):
+    """Create an experiment with standard channel configuration: each session has the data from each channel that was
+        recorded in this session (with the Flow2 this can change session to session if you don't use the raw TD-fNIRS
+        data, which we are currently not. see: https://docs.kernel.com/docs/data-export-pipelines)
+    
+    Args:
+        experiment_name: Name of the experiment
+        scanner_name: Name of the scanner device
+        
+    Returns:
+        Experiment instance with sessions using standard channels
+    """
     paths = get_session_paths(experiment_name, scanner_name)
     sessions = [create_session(p) for p in paths]
+    return Experiment(experiment_name, scanner_name, sessions)
+
+
+def create_experiment_with_common_channels(experiment_name, scanner_name):
+    """Create an experiment with common channel configuration across sessions.
+    
+    Args:
+        experiment_name: Name of the experiment
+        scanner_name: Name of the scanner device
+        
+    Returns:
+        Experiment instance with sessions using common channels
+    """
+    paths = get_session_paths(experiment_name, scanner_name)
+    sessions = [create_session_with_common_channels(p) for p in paths]
     return Experiment(experiment_name, scanner_name, sessions)
 
