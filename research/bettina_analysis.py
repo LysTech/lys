@@ -15,7 +15,7 @@ from lys.processing.steps import plot_hrf
 # create experiment
 experiment_name = "8classes"
 experiment = create_experiment(experiment_name, "nirs")
-experiment.sessions = experiment.sessions[3:4]
+#experiment.sessions = experiment.sessions[3:4]
 
 
 """ Check mesh and volume alignmnent """
@@ -38,11 +38,19 @@ config = [
     {"ConvertWavelengthsToOD": {}},
     {"ConvertODtoHbOandHbR": {}},
     {"RemoveScalpEffect": {}},
-    {"BandpassFilter": {"lower_bound": 0.01*3.4722, "upper_bound": 0.2*3.4722}},
-    {"ExtractHRF": {"tmin": -5.0, "tmax": 30.0}},  # ← new
-    {"ConvertToTStats": {}},
+    #{"BandpassFilter": {"lower_bound": 0.01, "upper_bound": 0.1}},
+    {"ExtractHRFviaCanonicalFit": {
+        "tmin":  -5,
+        "tmax":  30,
+        "tau_grid":   np.arange(0.6, 1.45, 0.05),
+        "delay_grid": np.arange(-2.0, 2.25, 0.25),
+        "ratio_grid": np.arange(0.10, 0.35, 0.05),
+        "ridge_lambda": None,          # keep OLS
+        "loss": "mad"                  # ← NEW (robust metric)
+    }},
+    {"ConvertToTStatsWithExtractedHRF": {}},
     {"ReconstructDualWithoutBadChannels":
-        {"num_eigenmodes": 390,
+        {"num_eigenmodes": 290,
          "lambda_selection": "corr",
          "mu_fixed": 0.1}},
 ]

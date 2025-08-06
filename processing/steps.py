@@ -1,3 +1,4 @@
+from __future__ import annotations
 import numpy as np
 from scipy import signal
 from sklearn.decomposition import PCA
@@ -36,33 +37,28 @@ def canonical_double_gamma_hrf(tr=1.0, duration=30.0):
 # ─── extract_hrf.py ──────────────────────────────────────────────────────────
 import numpy as np
 from typing import Dict, List, Tuple
+from lys.abstract_interfaces.processing_step import ProcessingStep
 import matplotlib.pyplot as plt
 from typing import Sequence, Union
 
 def plot_hrf(session,
              tasks:      Union[None, str, Sequence[str]] = None,
              channels:   Union[str, int, Sequence[int]] = "mean",
-             colors:     tuple[str, str] = ("C0", "C3"),  # HbO, HbR
-             outfile:    str = "hrf.png"):
+             colors:     tuple[str, str] = ("C0", "C3"),
+             outfile:    str = "hrf.png",
+             *,
+             block_averaging: str = "all"):
     """
-    Grand‑average HRF (HbO & HbR) for a lys *Session*.
+    Grand‑average HRF (HbO & HbR).
 
-    Parameters
-    ----------
-    tasks   : • None  – all tasks are pooled and averaged
-              • str   – *one* task name (plot this task only)
-              • list/tuple[str] – explicit set of tasks to average
-    channels: • "mean" – average across all *good* channels
-              • int    – *one* channel index (plots that channel only)
-              • list/tuple[int] – average across this set of indices
-    colors  : pair of matplotlib colours (HbO, HbR)
-    outfile : target path for the PNG
-
-    Notes
-    -----
-    *Bad* channels (as detected by `DetectBadChannels`) are always ignored.
-    A ±1 SD ribbon is drawn when more than one channel is averaged.
+    The *block_averaging* argument must match the setting that was used
+    when **ExtractHRF** ran on this session.  It is stored only for
+    user clarity – the plotting routine itself uses whatever HRF was
+    extracted earlier.
     """
+    if block_averaging not in ("all", "longest"):
+        raise ValueError("block_averaging must be 'all' or 'longest'")
+
     hrf   = session.processed_data["hrf"]
     t     = hrf["time"]                                # (L,)
 
@@ -102,10 +98,9 @@ def plot_hrf(session,
     for key, col in zip(("HbO", "HbR"), colors):
         mats = np.stack([hrf[key][task] for task in sel_tasks], axis=0)  # (T, L, C)
         grand = mats.mean(axis=0)             # (L, C) average over tasks
-        sel   = grand[:, sel_ch]              # (L, K)
-        mu    = sel.mean(axis=1)
-        sd    = sel.std(axis=1, ddof=0)
-
+        sel   = grand[:, sel_ch]
+        mu = np.nanmean(sel, axis=1)
+        sd = np.nanstd(sel, axis=1)
         plt.plot(t, mu, color=col, label=key)
         if sel_ch.size > 1:
             plt.fill_between(t, mu - sd, mu + sd, color=col, alpha=0.4, linewidth=0)
@@ -120,87 +115,800 @@ def plot_hrf(session,
     plt.savefig(outfile)
     plt.close()
 
+# ------------------------------------------------------------------
+# ↓↓↓ 1) ExtractHRF with block_averaging option  ↓↓↓
+# ------------------------------------------------------------------
+# ─── extract_hrf.py ──────────────────────────────────────────────────────
+import numpy as np
+from typing import Dict, List, Tuple
+from lys.abstract_interfaces.processing_step import ProcessingStep
+
+# ─── extract_hrf_glm.py ────────────────────────────────────────────────────────
+import numpy as np
+from typing import Dict, Tuple, Sequence, Union
+from lys.abstract_interfaces.processing_step import ProcessingStep
+
+# Re‑use the global sampling rate defined elsewhere in your pipeline
+fs = globals().get("fs", 3.4722)          # Hz
+
+from scipy.linalg import pinv
+from scipy.signal import savgol_filter
+
+# ─── ExtractHRFviaGLM (spline-basis + ridge) ────────────────────────────────
+import numpy as np
+from scipy.interpolate import BSpline, splev
+from scipy.linalg import toeplitz, cho_factor, cho_solve
+from lys.abstract_interfaces.processing_step import ProcessingStep
+from typing import Tuple, Dict
+
+# ─── ExtractHRFviaGLM (spline‑basis + ridge) ───────────────────────────────
+import numpy as np
+from scipy.interpolate import BSpline, splev
+from scipy.linalg import toeplitz, block_diag, cho_factor, cho_solve
+from lys.abstract_interfaces.processing_step import ProcessingStep
+from typing import Tuple, Dict
+
+# ──────────────────────────────────────────────────────────────────────────
+#  ExtractHRFviaGLM – low‑dimensional GLM HRF extractor
+# ──────────────────────────────────────────────────────────────────────────
+
+
+from typing import Dict, Tuple, Optional
+
+import numpy as np
+from numpy.linalg import pinv
+from scipy.interpolate import BSpline, splev
+
+from lys.abstract_interfaces.processing_step import ProcessingStep
+
+# --------------------------------------------------------------------------
+class ExtractHRFviaGLM(ProcessingStep):
+    """
+    Channel‑wise HRF estimation with a *basis‑function GLM*.
+
+    Workflow
+    --------
+    1. Choose a temporal basis B(τ)  (cubic B‑splines by default).
+    2. For every condition, convolve its box‑car on/off vector with **each**
+       column of B to build one long design matrix *X*.
+    3. Solve      β = (XᵀX + λI)⁻¹ Xᵀ y     (ridge optional).
+    4. Recreate a dense HRF     h(τ) = B(τ) β     for every channel.
+
+    Results are stored just like the “classic” ExtractHRF::
+
+        session.processed_data["hrf"] = {
+            "time" : 1‑D array (L,),
+            "HbO"  : {cond: (L, C) ndarray},
+            "HbR"  : {cond: (L, C) ndarray},
+        }
+
+    Parameters
+    ----------
+    tmin, tmax : float
+        Window [s] around each onset that the model spans (‑5…30 s by default).
+    basis : {"splines", "fir"}
+        • *splines* – cubic B‑splines (recommended, smooth & compact).
+        • *fir*     – “stick” FIR, one regressor per sample in the window.
+    n_knots : int
+        Number of interior knots for the spline basis (ignored for FIR).
+    ridge_lambda : float or None
+        If given, adds λI Tikhonov regularisation (ridge).  Set to *None* for
+        ordinary least squares.
+    """
+
+    # ------------------------------------------------------------------ #
+    def __init__(self,
+                 tmin: float = -5.0,
+                 tmax: float = 30.0,
+                 basis: str = "splines",
+                 n_knots: int = 8,
+                 ridge_lambda: Optional[float] = None):
+        if basis not in ("splines", "fir"):
+            raise ValueError("basis must be 'splines' or 'fir'")
+        self.tmin          = float(tmin)
+        self.tmax          = float(tmax)
+        self.basis         = basis
+        self.n_knots       = int(n_knots)
+        self.ridge_lambda  = ridge_lambda
+
+    # ======================================================================
+    # helpers – temporal bases
+    # ======================================================================
+    def _spline_basis(self, t: np.ndarray) -> np.ndarray:
+        """Cubic B‑spline basis evaluated at times *t* [s]."""
+        deg   = 3                                               # cubic
+        knots = np.linspace(self.tmin, self.tmax, self.n_knots) # interior
+        # repeat first & last knot 'deg' times → open spline
+        t_aug = np.r_[
+            np.full(deg,  knots[0]),
+            knots,
+            np.full(deg,  knots[-1])
+        ]
+        # one minimal‑support coefficient → one basis function
+        coeff = np.eye(len(t_aug) - deg - 1)
+        spl   = [BSpline(t_aug, coeff[i], deg, extrapolate=False)
+                 for i in range(coeff.shape[0])]
+        B     = np.column_stack([splev(t, s) for s in spl])     # (N, P+deg)
+        return B[:, deg:]                       # first 'deg' cols are zeros
+
+    def _fir_basis(self, t: np.ndarray, fs: float) -> np.ndarray:
+        """Simple FIR “stick” basis (one per sample)."""
+        L   = int(round((self.tmax - self.tmin) * fs))
+        idx = ((t - self.tmin) * fs).round().astype(int)
+        B   = np.zeros((t.size, L))
+        good = (idx >= 0) & (idx < L)
+        B[good, idx[good]] = 1.0
+        return B
+
+    def _build_basis(self, fs: float) -> Tuple[np.ndarray, np.ndarray]:
+        """Return (basis matrix Bτ, time_axis)."""
+        L        = int(round((self.tmax - self.tmin) * fs))
+        time_ax  = np.arange(L) / fs + self.tmin
+        if self.basis == "splines":
+            B_tau = self._spline_basis(time_ax)
+        else:
+            B_tau = self._fir_basis(time_ax, fs)
+        return B_tau, time_ax
+
+    # ======================================================================
+    # main entry
+    # ======================================================================
+    def _do_process(self, session: "Session") -> None:          # noqa: N802
+        HbO = session.processed_data["HbO"]      # (T, C)
+        HbR = session.processed_data["HbR"]
+        fs  = globals().get("fs", 3.4722)        # Hz
+
+        B_tau, t_vec = self._build_basis(fs)     # (L, P)
+        P    = B_tau.shape[1]
+        T, C = HbO.shape
+
+        hrf_HbO: Dict[str, np.ndarray] = {}
+        hrf_HbR: Dict[str, np.ndarray] = {}
+
+        for cond in session.protocol.tasks:
+            # ---------------- design matrix ----------------------------
+            X = np.zeros((T, P))
+            for t0, _, lbl in session.protocol.intervals:
+                if lbl != cond:
+                    continue
+                start = int(round((t0 + self.tmin) * fs))
+                end   = start + B_tau.shape[0]
+                if start < 0 or end > T:        # skip truncated epochs
+                    continue
+                X[start:end, :] += B_tau        # allow overlaps
+
+            if not X.any():                     # no complete epochs
+                continue
+
+            # ---------------- ridge / OLS solve ------------------------
+            if self.ridge_lambda is None:
+                XtX_inv = pinv(X.T @ X)
+            else:
+                lam     = float(self.ridge_lambda)
+                XtX_inv = pinv(X.T @ X + lam * np.eye(P))
+
+            β_O = XtX_inv @ X.T @ HbO           # (P, C)
+            β_R = XtX_inv @ X.T @ HbR
+
+            hrf_HbO[cond] = B_tau @ β_O         # (L, C)
+            hrf_HbR[cond] = B_tau @ β_R
+
+        # ---------------- stash result --------------------------------
+        session.processed_data["hrf"] = {
+            "time": t_vec,
+            "HbO":  hrf_HbO,
+            "HbR":  hrf_HbR,
+        }
+
+# ─── canonical_hrf_tools.py ────────────────────────────────────────────────
+import numpy as np
+from numpy.linalg import lstsq
+from scipy.signal import convolve
+from scipy.stats import gamma
+from lys.abstract_interfaces.processing_step import ProcessingStep
+
+# ─── canonical_hrf.py ────────────────────────────────────────────────
+import numpy as np
+from scipy.stats import gamma
+
+
+def canonical_hrf(t: np.ndarray,
+                  tau: float   = 1.0,
+                  ratio: float = 1/6,
+                  delay: float = 0.0,
+                  p1:   int    = 6,
+                  p2:   int    = 16) -> np.ndarray:
+    """
+    Double-gamma haemodynamic response function.
+
+    Parameters
+    ----------
+    t      : time vector [s]
+    tau    : common time-dilation (>1 = slower / broader)
+    ratio  : undershoot / peak amplitude (≈ 1/6 for SPM default)
+    delay  : pure time shift of the whole kernel (+ = later)
+    p1, p2 : shape parameters of the two gamma functions
+             (kept fixed at 6 & 16 – can also be added to the grid)
+
+    Returns
+    -------
+    hrf(t) normalised to peak +1.
+    """
+    t_scal = (t - delay) / tau
+    hrf = gamma.pdf(t_scal, p1) - ratio * gamma.pdf(t_scal, p2)
+    hrf /= np.max(np.abs(hrf)) + 1e-12
+    return hrf
+
+
+# ───────────────────────────────────────────────────────────────────────────
+# ─── extract_hrf_via_canonical_fit.py ───────────────────────────────
+
+import numpy as np
+from itertools import product
+from numpy.linalg import lstsq, pinv
+from scipy.signal import convolve
+
+from lys.abstract_interfaces.processing_step import ProcessingStep
+
+'''
+class ExtractHRFviaCanonicalFit(ProcessingStep):
+    """
+    Canonical-HRF GLM with **three global shape parameters**
+    (τ, δ, ρ) chosen by grid search.
+
+    Adds to `session.processed_data` the dictionary
+
+        "hrf" = {
+            "time" : (L,),                 # seconds  (tmin…tmax)
+            "HbO"  : {task: (L,C) ndarray},
+            "HbR"  : {task: (L,C) ndarray},
+            "tau"  : τ*,   "delay": δ*,   "ratio": ρ*
+        }
+
+    Parameters
+    ----------
+    tmin, tmax : epoch window relative to onset [s]
+    tau_grid   : iterable of τ values   (default 0.6 … 1.4)
+    delay_grid : iterable of δ values   (default –2 … +2 s)
+    ratio_grid : iterable of ρ values   (default 0.10 … 0.30)
+    ridge_lambda : None = pure OLS, otherwise λ for ridge
+    baseline : (float, float)
+        baseline window [s] relative to onset subtracted per channel
+    """
+
+    # ------------------------------------------------------------------
+    def __init__(self,
+                 tmin: float = -5.0,
+                 tmax: float = 30.0,
+                 *,
+                 tau_grid:   np.ndarray | list = np.arange(0.6, 1.45, 0.05),
+                 delay_grid: np.ndarray | list = np.arange(-2.0, 2.25, 0.25),
+                 ratio_grid: np.ndarray | list = np.arange(0.10, 0.35, 0.05),
+                 ridge_lambda: float | None = None,
+                 baseline: tuple[float, float] = (-5.0, 0.0)):
+        self.tmin, self.tmax = float(tmin), float(tmax)
+        self.tau_grid   = np.asarray(tau_grid,   float)
+        self.delay_grid = np.asarray(delay_grid, float)
+        self.ratio_grid = np.asarray(ratio_grid, float)
+        self.ridge_lambda = ridge_lambda
+        self.baseline_window = baseline
+
+    # ======================= helpers =================================
+    def _design_matrix(self,
+                       protocol,
+                       fs: float,
+                       n_time: int,
+                       hrf_kernel: np.ndarray,
+                       tasks: list[str]) -> np.ndarray:
+        """Box-car for every task, convolved with *hrf_kernel*."""
+        n_tasks = len(tasks)
+        X = np.zeros((n_time, n_tasks))
+        for j, task in enumerate(tasks):
+            for onset, offset, lbl in protocol.intervals:
+                if lbl != task:
+                    continue
+                on = int(round(onset * fs))
+                off = int(round(offset * fs))
+                if on >= n_time:
+                    continue
+                X[on:off, j] = 1.0
+        # HRF convolution per column
+        for j in range(n_tasks):
+            X[:, j] = convolve(X[:, j], hrf_kernel, mode="full")[:n_time]
+        return X
+
+    def _fit_beta_rss(self, Y: np.ndarray, X: np.ndarray, lam: float | None):
+        """Return β and residual-sum-of-squares."""
+        if lam is None:                          # ordinary least squares
+            β, *_ = lstsq(X, Y, rcond=None)
+        else:                                    # ridge
+            XtX_inv = pinv(X.T @ X + lam * np.eye(X.shape[1]))
+            β = XtX_inv @ X.T @ Y
+        res = Y - X @ β
+        return β, float(np.sum(res * res))
+
+    # ======================= main ====================================
+    def _do_process(self, session: "Session") -> None:          # noqa: N802
+        HbO = session.processed_data["HbO"]        # (T, C)
+        HbR = session.processed_data["HbR"]
+        fs  = globals().get("fs", 3.4722)          # Hz
+        T, C = HbO.shape
+
+        # ------------- baseline correction (optional) -----------------
+        b0 = int(round(self.baseline_window[0] * fs))
+        b1 = int(round(self.baseline_window[1] * fs))
+        if 0 <= b0 < b1 <= T:
+            HbO = HbO - HbO[b0:b1].mean(axis=0)
+            HbR = HbR - HbR[b0:b1].mean(axis=0)
+
+        tasks = list(session.protocol.tasks)
+
+        # ------------- time axis for the HRF to be returned ----------
+        L = int(round((self.tmax - self.tmin) * fs))
+        t_hrf = np.arange(L) / fs + self.tmin
+
+        # ------------- brute-force search over (τ, δ, ρ) --------------
+        best = {"rss": np.inf}
+        n_time = T
+        for τ, δ, ρ in product(self.tau_grid,
+                               self.delay_grid,
+                               self.ratio_grid):
+            hrf_kern = canonical_hrf(t_hrf, tau=τ, ratio=ρ, delay=δ)
+            X = self._design_matrix(session.protocol, fs, n_time,
+                                    hrf_kern, tasks)
+            β_O, rss_O = self._fit_beta_rss(HbO, X, self.ridge_lambda)
+            β_R, rss_R = self._fit_beta_rss(HbR, X, self.ridge_lambda)
+            rss_tot = rss_O + rss_R
+            if rss_tot < best["rss"]:
+                best.update(tau=τ, delay=δ, ratio=ρ,
+                            rss=rss_tot, βO=β_O, βR=β_R, X=X)
+        # ------- NEW: automatic global-sign correction -------------------
+        # median_beta = np.median(np.concatenate((best["βO"].ravel(),
+        #                                         best["βR"].ravel())))
+        # if median_beta < 0:
+        #     print("[Canonical-Fit]   β-sign flipped (auto-correct)")
+        #     best["βO"] *= -1.0
+        #     best["βR"] *= -1.0
+
+        # ------------- reconstruct channel-wise HRFs -----------------
+        hrf_kernel = canonical_hrf(t_hrf,
+                                   tau   = best["tau"],
+                                   ratio = best["ratio"],
+                                   delay = best["delay"])
+        hrf_HbO = {}
+        hrf_HbR = {}
+        for j, task in enumerate(tasks):
+            βO = best["βO"][j]          # (C,)
+            βR = best["βR"][j]
+            hrf_HbO[task] = np.outer(hrf_kernel, βO)   # (L, C)
+            hrf_HbR[task] = np.outer(hrf_kernel, βR)
+
+        # ------------- stash in session ------------------------------
+        session.processed_data["hrf"] = {
+            "time":  t_hrf,
+            "HbO":   hrf_HbO,
+            "HbR":   hrf_HbR,
+            "tau":   best["tau"],
+            "delay": best["delay"],
+            "ratio": best["ratio"],
+        }
+        print(f"[Canonical-Fit]  τ*={best['tau']:.2f}  "
+              f"δ*={best['delay']:+.2f}s  ρ*={best['ratio']:.2f}  "
+              f"RSS={best['rss']:.3g}")
+        # ------------- Diagnostics: β histogram + design matrix ----------
+        import matplotlib.pyplot as plt
+
+        # β-histogram (HbO only)
+        β_all = best["βO"].ravel()
+        plt.figure(figsize=(4, 3))
+        plt.hist(β_all, bins=40, color="C0", edgecolor="k")
+        plt.axvline(0, color="k", lw=0.6)
+        plt.title("Distribution of β_O (HbO amplitudes)")
+        plt.xlabel("β_O"); plt.ylabel("Count")
+        plt.tight_layout()
+        plt.savefig("canonical_beta_hist.png")
+        plt.close()
+
+        # Design matrix
+        plt.figure(figsize=(6, 4))
+        plt.imshow(best["X"], aspect="auto", cmap="gray_r", interpolation="nearest")
+        plt.title("Design matrix X (HRF-convolved)")
+        plt.xlabel("Regressor"); plt.ylabel("Time")
+        plt.tight_layout()
+        plt.savefig("canonical_design_matrix.png")
+        plt.close()
+'''
+# ─── extract_hrf_via_canonical_fit.py ───────────────────────────────
+import numpy as np
+from itertools import product
+from numpy.linalg import lstsq, pinv
+from scipy.signal import convolve
+
+from lys.abstract_interfaces.processing_step import ProcessingStep
+
+
+class ExtractHRFviaCanonicalFit(ProcessingStep):
+    """
+    Canonical-HRF GLM with brute-force search over three global shape
+    parameters (τ, δ, ρ).
+
+    Adds to ``session.processed_data``::
+
+        "hrf" = {
+            "time"  : (L,),                 # seconds  (tmin…tmax)
+            "HbO"   : {task: (L,C) ndarray},
+            "HbR"   : {task: (L,C) ndarray},
+            "tau"   : τ*,   "delay": δ*,   "ratio": ρ*
+        }
+
+    Parameters
+    ----------
+    tmin, tmax : float
+        Window around each onset [s]  (default –5 … +30).
+    tau_grid, delay_grid, ratio_grid : array-like
+        Values tested for τ (time dilation), δ (delay) and ρ (undershoot/peak).
+    ridge_lambda : float | None
+        If *None* → ordinary least squares, else λ for ridge.
+    baseline : (float, float)
+        Baseline window [s] relative to onset, removed from each channel.
+    loss : {"rss", "mad"}
+        Error metric used during the grid search
+
+        * ``"rss"`` – residual-sum-of-squares  Σ‖y−Xβ‖²  (original behaviour)
+        * ``"mad"`` – **robust** sum of median-absolute-deviation (per channel)
+                      Σ     MAD_t | (res_i − median(res_i)) |
+    """
+
+    # ------------------------------------------------------------------
+    def __init__(self,
+                 tmin: float = -5.0,
+                 tmax: float = 30.0,
+                 *,
+                 tau_grid:   np.ndarray | list = np.arange(0.6, 1.45, 0.05),
+                 delay_grid: np.ndarray | list = np.arange(-2.0, 2.25, 0.25),
+                 ratio_grid: np.ndarray | list = np.arange(0.10, 0.35, 0.05),
+                 ridge_lambda: float | None = None,
+                 baseline: tuple[float, float] = (-5.0, 0.0),
+                 loss: str = "rss"):
+        if loss not in ("rss", "mad"):
+            raise ValueError("loss must be 'rss' or 'mad'")
+        self.tmin, self.tmax = float(tmin), float(tmax)
+        self.tau_grid   = np.asarray(tau_grid,   float)
+        self.delay_grid = np.asarray(delay_grid, float)
+        self.ratio_grid = np.asarray(ratio_grid, float)
+        self.ridge_lambda    = ridge_lambda
+        self.baseline_window = baseline
+        self.loss            = loss    # NEW
+
+    # ======================= helpers =================================
+    def _design_matrix(self,
+                       protocol,
+                       fs: float,
+                       n_time: int,
+                       hrf_kernel: np.ndarray,
+                       tasks: list[str]) -> np.ndarray:
+        """Box-car for every task, convolved with *hrf_kernel*."""
+        n_tasks = len(tasks)
+        X = np.zeros((n_time, n_tasks))
+        for j, task in enumerate(tasks):
+            for onset, offset, lbl in protocol.intervals:
+                if lbl != task:
+                    continue
+                on  = int(round(onset * fs))
+                off = int(round(offset * fs))
+                if on >= n_time:
+                    continue
+                X[on:off, j] = 1.0
+        # Convolve each regressor with the HRF
+        for j in range(n_tasks):
+            X[:, j] = convolve(X[:, j], hrf_kernel, mode="full")[:n_time]
+        return X
+
+    # ------------------------------------------------------------------
+    def _solve_beta(self, Y: np.ndarray, X: np.ndarray, lam: float | None):
+        """Return β  (no error metric here)."""
+        if lam is None:                              # OLS
+            β, *_ = lstsq(X, Y, rcond=None)
+        else:                                        # ridge
+            XtX_inv = pinv(X.T @ X + lam * np.eye(X.shape[1]))
+            β = XtX_inv @ X.T @ Y
+        return β                                     # (P, C)
+
+    # ======================= main ====================================
+    def _do_process(self, session: "Session") -> None:          # noqa: N802
+        HbO = session.processed_data["HbO"]        # (T, C)
+        HbR = session.processed_data["HbR"]
+        fs  = globals().get("fs", 3.4722)          # Hz
+        T, C = HbO.shape
+
+        # -------- baseline correction (optional) -----------------------
+        b0 = int(round(self.baseline_window[0] * fs))
+        b1 = int(round(self.baseline_window[1] * fs))
+        if 0 <= b0 < b1 <= T:
+            HbO = HbO - HbO[b0:b1].mean(axis=0)
+            HbR = HbR - HbR[b0:b1].mean(axis=0)
+
+        tasks = list(session.protocol.tasks)
+
+        # -------- time axis for HRF -----------------------------------
+        L = int(round((self.tmax - self.tmin) * fs))
+        t_hrf = np.arange(L) / fs + self.tmin
+
+        # -------- grid search over (τ, δ, ρ) --------------------------
+        best = {"score": np.inf}
+        n_time = T
+        for τ, δ, ρ in product(self.tau_grid,
+                               self.delay_grid,
+                               self.ratio_grid):
+            hrf_kern = canonical_hrf(t_hrf, tau=τ, ratio=ρ, delay=δ)
+            X = self._design_matrix(session.protocol, fs, n_time,
+                                    hrf_kern, tasks)
+
+            β_O = self._solve_beta(HbO, X, self.ridge_lambda)   # (P,C)
+            β_R = self._solve_beta(HbR, X, self.ridge_lambda)
+
+            # ---------- compute error according to chosen metric -----
+            res_O = HbO - X @ β_O
+            res_R = HbR - X @ β_R
+
+            if self.loss == "rss":
+                score = float(np.sum(res_O * res_O) + np.sum(res_R * res_R))
+            else:  # "mad"
+                mad_O = np.median(np.abs(res_O -
+                                         np.median(res_O, axis=0, keepdims=True)),
+                                  axis=0)   # (C,)
+                mad_R = np.median(np.abs(res_R -
+                                         np.median(res_R, axis=0, keepdims=True)),
+                                  axis=0)
+                score = float(np.sum(mad_O + mad_R))
+
+            if score < best["score"]:
+                best.update(score=score, tau=τ, delay=δ, ratio=ρ,
+                            βO=β_O, βR=β_R, X=X)
+
+        # -------- reconstruct channel-wise HRFs -----------------------
+        hrf_kernel = canonical_hrf(t_hrf,
+                                   tau   = best["tau"],
+                                   ratio = best["ratio"],
+                                   delay = best["delay"])
+        hrf_HbO, hrf_HbR = {}, {}
+        for j, task in enumerate(tasks):
+            hrf_HbO[task] = np.outer(hrf_kernel, best["βO"][j])  # (L,C)
+            hrf_HbR[task] = np.outer(hrf_kernel, best["βR"][j])
+
+        # -------- stash in session ------------------------------------
+        session.processed_data["hrf"] = {
+            "time":  t_hrf,
+            "HbO":   hrf_HbO,
+            "HbR":   hrf_HbR,
+            "tau":   best["tau"],
+            "delay": best["delay"],
+            "ratio": best["ratio"],
+        }
+
+        print(f"[Canonical-Fit/{self.loss.upper()}]  "
+              f"τ*={best['tau']:.2f}  δ*={best['delay']:+.2f}s  "
+              f"ρ*={best['ratio']:.2f}  score={best['score']:.3g}")
+
+        # ---------------- diagnostics (unchanged) ----------------------
+        import matplotlib.pyplot as plt
+
+        β_all = best["βO"].ravel()
+        plt.figure(figsize=(4, 3))
+        plt.hist(β_all, bins=40, color="C0", edgecolor="k")
+        plt.axvline(0, color="k", lw=0.6)
+        plt.title("Distribution of β_O (HbO amplitudes)")
+        plt.xlabel("β_O"); plt.ylabel("Count")
+        plt.tight_layout()
+        plt.savefig("canonical_beta_hist.png")
+        plt.close()
+
+        plt.figure(figsize=(6, 4))
+        plt.imshow(best["X"], aspect="auto", cmap="gray_r",
+                   interpolation="nearest")
+        plt.title("Design matrix X (HRF-convolved)")
+        plt.xlabel("Regressor"); plt.ylabel("Time")
+        plt.tight_layout()
+        plt.savefig("canonical_design_matrix.png")
+        plt.close()
+
 class ExtractHRF(ProcessingStep):
     """
     Event‑locked, baseline‑corrected HRF extraction.
 
-    Adds:
-        session.processed_data["hrf"] = {
-            "time" : 1‑D array,                 # seconds relative to onset
-            "HbO"  : {cond: (L, C) ndarray},    # L = n_lags, C = n_channels
-            "HbR"  : {cond: (L, C) ndarray},
-        }
+    Parameters
+    ----------
+    tmin, tmax : float
+        Window [s] relative to onset (default –5…+30).
+    baseline : (float, float)
+        Baseline window [s] relative to onset (default –5…0).
+    block_averaging : {"all", "longest"}
+        "all"      – use every block
+        "longest"  – average **up to 5 longest blocks** per task
+                     (fewer if the task occurs < 5 times)
     """
 
     def __init__(self,
-                 tmin: float = -5.0,          # s before onset  (baseline window starts here)
-                 tmax: float = 30.0,          # s after onset   (end of HRF window)
-                 baseline: Tuple[float,float] = (-5.0, 0.0)  # s w.r.t onset
-                 ):
+                 tmin: float = -5.0,
+                 tmax: float = 30.0,
+                 baseline: Tuple[float, float] = (-5.0, 0.0),
+                 block_averaging: str = "all"):
+        if block_averaging not in ("all", "longest"):
+            raise ValueError("block_averaging must be 'all' or 'longest'")
         self.tmin, self.tmax = tmin, tmax
         self.baseline        = baseline
+        self.block_mode      = block_averaging
 
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------ #
     # main entry
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------ #
     def _do_process(self, session: "Session") -> None:
+
         HbO = session.processed_data["HbO"]      # (T, C)
         HbR = session.processed_data["HbR"]
-        fs  = globals().get("fs", 3.4722)        # Hz; already defined above
-        C   = HbO.shape[1]                       # S·D channels
+        fs  = globals().get("fs", 3.4722)        # Hz
+        C   = HbO.shape[1]
 
-        # time axis for the extracted HRF
-        L         = int(round((self.tmax - self.tmin) * fs))          # samples per epoch
-        time_axis = np.arange(L) / fs + self.tmin                     # seconds
+        # unified time axis (full window from tmin … tmax)
+        L_full   = int(round((self.tmax - self.tmin) * fs))
+        t_axis   = np.arange(L_full) / fs + self.tmin
 
-        hrf_HbO: Dict[str,np.ndarray] = {}
-        hrf_HbR: Dict[str,np.ndarray] = {}
+        # cache block lengths
+        blocks = [(s, e, lbl, e - s) for s, e, lbl in session.protocol.intervals]
 
-        for cond in session.protocol.tasks:
-            # ---- collect onset indices ---------------------------------
-            onsets = [start for start, _, label in session.protocol.intervals
-                      if label == cond]
-            segments_O: List[np.ndarray] = []
-            segments_R: List[np.ndarray] = []
+        hrf_HbO: Dict[str, np.ndarray] = {}
+        hrf_HbR: Dict[str, np.ndarray] = {}
 
+        # ================================================================
+        # iterate over tasks / conditions
+        # ================================================================
+        for task in session.protocol.tasks:
+
+            # ---------- choose which onsets to use ----------------------
+            if self.block_mode == "longest":
+                cand = sorted(
+                    [(length, s) for s, _, lbl, length in blocks if lbl == task],
+                    key=lambda t: t[0], reverse=True)[:5]         # TOP‑5
+                onsets = [s for _, s in cand]
+            else:       # "all"
+                onsets = [s for s, _, lbl, _ in blocks if lbl == task]
+
+            if not onsets:        # nothing to average
+                continue
+
+            seg_O, seg_R = [], []
+
+            # ============================================================
+            # build per‑epoch matrices
+            # ============================================================
             for t0 in onsets:
+                # retrieve true block length (seconds)
+                true_len = next(length for s,e,lbl,length in blocks
+                                if s == t0 and lbl == task)
+                valid_L  = int(round((true_len - self.tmin) * fs))
+                valid_L  = np.clip(valid_L, 0, L_full)            # guard rails
+
+                # --- extract raw epoch --------------------------------
                 start = int(round((t0 + self.tmin) * fs))
-                end   = start + L
-                if start < 0 or end > HbO.shape[0]:        # skip truncated epochs
+                if start < 0:                                      # pre‑data
                     continue
+                raw_O = HbO[start:start + valid_L, :].copy()
+                raw_R = HbR[start:start + valid_L, :].copy()
 
-                seg_O = HbO[start:end, :].copy()           # (L, C)
-                seg_R = HbR[start:end, :].copy()
-
-                # ---- baseline‑correct each trial -----------------------
+                # --- baseline correction -----------------------------
                 b0 = int(round((t0 + self.baseline[0]) * fs))
                 b1 = int(round((t0 + self.baseline[1]) * fs))
                 if b0 >= 0 and b1 > b0:
-                    base_O = HbO[b0:b1, :].mean(axis=0)
-                    base_R = HbR[b0:b1, :].mean(axis=0)
-                    seg_O -= base_O
-                    seg_R -= base_R
+                    raw_O -= HbO[b0:b1].mean(axis=0)
+                    raw_R -= HbR[b0:b1].mean(axis=0)
 
-                segments_O.append(seg_O)
-                segments_R.append(seg_R)
+                # --- pad with NaNs up to the full window length -------
+                pad_O = np.full((L_full, C), np.nan)
+                pad_R = np.full_like(pad_O, np.nan)
+                pad_O[:valid_L, :] = raw_O
+                pad_R[:valid_L, :] = raw_R
 
-            # ---- grand‑average over trials -----------------------------
-            if segments_O:                       # at least one good epoch
-                hrf_HbO[cond] = np.mean(np.stack(segments_O, axis=0), axis=0)
-                hrf_HbR[cond] = np.mean(np.stack(segments_R, axis=0), axis=0)
+                seg_O.append(pad_O)
+                seg_R.append(pad_R)
 
-        # stash results
+            # ============================================================
+            # average across epochs  (ignoring NaNs)
+            # ============================================================
+            if seg_O:        # at least one good epoch
+                cube_O = np.stack(seg_O)            # (E, L_full, C)
+                cube_R = np.stack(seg_R)
+                hrf_HbO[task] = np.nanmean(cube_O, axis=0)
+                hrf_HbR[task] = np.nanmean(cube_R, axis=0)
+
+        # stash result
         session.processed_data["hrf"] = {
-            "time": time_axis,          # (L,)
+            "time": t_axis,        # length = L_full
             "HbO":  hrf_HbO,
             "HbR":  hrf_HbR,
         }
 
 
+# class ExtractHRF(ProcessingStep):
+#     """
+#     Event‑locked, baseline‑corrected HRF extraction.
+#
+#     Adds:
+#         session.processed_data["hrf"] = {
+#             "time" : 1‑D array,                 # seconds relative to onset
+#             "HbO"  : {cond: (L, C) ndarray},    # L = n_lags, C = n_channels
+#             "HbR"  : {cond: (L, C) ndarray},
+#         }
+#     """
+#
+#     def __init__(self,
+#                  tmin: float = -5.0,          # s before onset  (baseline window starts here)
+#                  tmax: float = 30.0,          # s after onset   (end of HRF window)
+#                  baseline: Tuple[float,float] = (-5.0, 0.0)  # s w.r.t onset
+#                  ):
+#         self.tmin, self.tmax = tmin, tmax
+#         self.baseline        = baseline
+#
+#     # ------------------------------------------------------------------
+#     # main entry
+#     # ------------------------------------------------------------------
+#     def _do_process(self, session: "Session") -> None:
+#         HbO = session.processed_data["HbO"]      # (T, C)
+#         HbR = session.processed_data["HbR"]
+#         fs  = globals().get("fs", 3.4722)        # Hz; already defined above
+#         C   = HbO.shape[1]                       # S·D channels
+#
+#         # time axis for the extracted HRF
+#         L         = int(round((self.tmax - self.tmin) * fs))          # samples per epoch
+#         time_axis = np.arange(L) / fs + self.tmin                     # seconds
+#
+#         hrf_HbO: Dict[str,np.ndarray] = {}
+#         hrf_HbR: Dict[str,np.ndarray] = {}
+#
+#         for cond in session.protocol.tasks:
+#             # ---- collect onset indices ---------------------------------
+#             onsets = [start for start, _, label in session.protocol.intervals
+#                       if label == cond]
+#             segments_O: List[np.ndarray] = []
+#             segments_R: List[np.ndarray] = []
+#
+#             for t0 in onsets:
+#                 start = int(round((t0 + self.tmin) * fs))
+#                 end   = start + L
+#                 if start < 0 or end > HbO.shape[0]:        # skip truncated epochs
+#                     continue
+#
+#                 seg_O = HbO[start:end, :].copy()           # (L, C)
+#                 seg_R = HbR[start:end, :].copy()
+#
+#                 # ---- baseline‑correct each trial -----------------------
+#                 b0 = int(round((t0 + self.baseline[0]) * fs))
+#                 b1 = int(round((t0 + self.baseline[1]) * fs))
+#                 if b0 >= 0 and b1 > b0:
+#                     base_O = HbO[b0:b1, :].mean(axis=0)
+#                     base_R = HbR[b0:b1, :].mean(axis=0)
+#                     seg_O -= base_O
+#                     seg_R -= base_R
+#
+#                 segments_O.append(seg_O)
+#                 segments_R.append(seg_R)
+#
+#             # ---- grand‑average over trials -----------------------------
+#             if segments_O:                       # at least one good epoch
+#                 hrf_HbO[cond] = np.mean(np.stack(segments_O, axis=0), axis=0)
+#                 hrf_HbR[cond] = np.mean(np.stack(segments_R, axis=0), axis=0)
+#
+#         # stash results
+#         session.processed_data["hrf"] = {
+#             "time": time_axis,          # (L,)
+#             "HbO":  hrf_HbO,
+#             "HbR":  hrf_HbR,
+#         }
+
+
 def detect_bad_channels(raw_wl1: np.ndarray,
                         raw_wl2: np.ndarray,
-                        cv_high_thresh: float = 0.50,
-                        cv_low_thresh: float  = 0.0001
+                        cv_high_thresh: float = 0.15,
+                        cv_low_thresh: float  = 0.001
                         ) -> list[int]:
     """
     Identify bad source–detector channels based on coefficient of variation
@@ -1274,6 +1982,7 @@ class ReconstructDual(ProcessingStep):
 import numpy as np
 from typing import List, Tuple
 
+
 class ReconstructDualWithoutBadChannels(ProcessingStep):
     """
     Dual‑wavelength eigen‑mode reconstruction with bad‑channel pruning.
@@ -1659,6 +2368,182 @@ class ReconstructDualWithoutBadChannels(ProcessingStep):
         del session.processed_data["t_HbR"]
 
 
+# ─── convert_to_tstats.py ──────────────────────────────────────────────
+
+import numpy as np
+from scipy.signal import convolve
+from lys.abstract_interfaces.processing_step import ProcessingStep
+from lys.objects import Session
+
+
+# grab the two HRF helpers that already live in your namespace
+#   canonical_hrf()            – data-driven, needs (t, tau, delay, ratio)
+#   canonical_double_gamma_hrf – SPM-like default
+# plus the global sampling rate ‘fs’ that is defined at the top of the file
+# ----------------------------------------------------------------------
+
+class ConvertToTStatsWithExtractedHRF(ProcessingStep):
+    """
+    GLM-based conversion of HbO/HbR to per-condition *t*-statistics.
+
+    Uses the session-specific HRF (τ*, δ*, ρ*) that was found during
+    *ExtractHRFviaCanonicalFit*.  If those parameters are missing it falls
+    back to the canonical double-gamma HRF.
+    """
+
+    # ------------------------------------------------------------------
+    def __init__(self, max_iter: int = 20, tol: float = 1e-2):
+        self.max_iter = int(max_iter)
+        self.tol = float(tol)
+
+    # ==================================================================
+    # main entry
+    # ==================================================================
+    def _do_process(self, session: Session) -> None:
+
+        HbO = session.processed_data["HbO"]  # (T, C)
+        HbR = session.processed_data["HbR"]
+        fs_ = globals().get("fs", 3.4722)  # Hz
+        T, _ = HbO.shape
+
+        # --------------------------------------------------------------
+        # 1) build the HRF kernel (data-driven if possible)
+        # --------------------------------------------------------------
+        hrf_info = session.processed_data.get("hrf", {})
+        have_fit = {"tau", "delay", "ratio", "time"} <= hrf_info.keys()
+
+        if have_fit:  # preferred path
+            tau = hrf_info["tau"]
+            delay = hrf_info["delay"]
+            ratio = hrf_info["ratio"]
+            t_vec = hrf_info["time"]  # (L,)
+            hrf_kernel = canonical_hrf(t_vec,
+                                       tau=tau,
+                                       delay=delay,
+                                       ratio=ratio)
+        else:  # backward-compatible
+            tr = 1.0 / fs_
+            hrf_kernel = canonical_double_gamma_hrf(tr=tr, duration=30.0)
+            print("falling back to default gamma, params not extracted\n")
+
+        # --------------------------------------------------------------
+        # 2) run channel-wise GLMs → t-maps
+        # --------------------------------------------------------------
+        t_HbO, t_HbR = self._get_t_stats(
+            HbO, HbR, session.protocol,
+            fs_, T, hrf_kernel
+        )
+
+        session.processed_data["t_HbO"] = t_HbO
+        session.processed_data["t_HbR"] = t_HbR
+        # leave HbO/HbR intact – other steps may still need them
+
+    # ==================================================================
+    # helpers
+    # ==================================================================
+    def _get_t_stats(self,
+                     HbO: np.ndarray,
+                     HbR: np.ndarray,
+                     protocol,
+                     fs: float,
+                     n_time: int,
+                     hrf_kernel: np.ndarray
+                     ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+
+        X, conditions = self._create_design_matrix(
+            protocol, fs, n_time, hrf_kernel
+        )
+
+        n_channels = HbO.shape[1]
+        S, D = num_sources, num_detectors
+
+        t_HbO_arr = np.zeros((n_channels, len(conditions)))
+        t_HbR_arr = np.zeros_like(t_HbO_arr)
+
+        for ch in range(n_channels):
+            beta_o, t_o = self._glm_single_channel_tstats(
+                HbO[:, ch], X, self.max_iter, self.tol
+            )
+            t_HbO_arr[ch] = t_o
+
+            beta_r, t_r = self._glm_single_channel_tstats(
+                -HbR[:, ch], X, self.max_iter, self.tol
+            )
+            t_HbR_arr[ch] = t_r
+
+        # reshape flat-channel vectors → (S, D) matrices
+        t_HbO = {cond: t_HbO_arr[:, i].reshape(S, D, order='F')
+                 for i, cond in enumerate(conditions)}
+        t_HbR = {cond: t_HbR_arr[:, i].reshape(S, D, order='F')
+                 for i, cond in enumerate(conditions)}
+        return t_HbO, t_HbR
+
+    # ------------------------------------------------------------------
+    def _create_design_matrix(self,
+                              protocol,
+                              fs: float,
+                              n_time: int,
+                              hrf_kernel: np.ndarray
+                              ) -> tuple[np.ndarray, list[str]]:
+
+        conditions = sorted(list(protocol.tasks))
+        X = np.zeros((n_time, len(conditions)))
+
+        for i, cond in enumerate(conditions):
+            for onset, offset, lbl in protocol.intervals:
+                if lbl != cond:
+                    continue
+                on = int(round(onset * fs))
+                off = int(round(offset * fs))
+                X[on:off, i] = 1.0
+
+        # HRF convolution (per column)
+        for i in range(X.shape[1]):
+            X[:, i] = convolve(X[:, i], hrf_kernel, mode='full')[:n_time]
+
+        return X, conditions
+
+    # ------------------------------------------------------------------
+    def _glm_single_channel_tstats(self,
+                                   y: np.ndarray,
+                                   X: np.ndarray,
+                                   max_iter: int,
+                                   tol: float
+                                   ) -> tuple[np.ndarray, np.ndarray]:
+
+        n_time, n_reg = X.shape
+        beta = np.zeros(n_reg)
+        resid = y.copy()
+
+        for _ in range(max_iter):
+            beta_old = beta.copy()
+
+            # AR(1) estimate
+            rho = 0.0
+            if n_time > 1:
+                rho = np.corrcoef(resid[:-1], resid[1:])[0, 1]
+                rho = np.clip(rho, -0.99, 0.99)
+
+            # whitening
+            W = np.eye(n_time)
+            for t in range(1, n_time):
+                W[t, t - 1] = -rho
+            y_w = W @ y
+            X_w = W @ X
+
+            beta = np.linalg.lstsq(X_w, y_w, rcond=None)[0]
+            resid = y - X @ beta
+
+            if np.max(np.abs(beta - beta_old)) < tol:
+                break
+
+        sigma2 = np.var(resid, ddof=n_reg)
+        XtX_inv = np.linalg.inv(X_w.T @ X_w)
+        se_beta = np.sqrt(np.diag(sigma2 * XtX_inv))
+        t_vals = beta / (se_beta + 1e-12)
+        return beta, t_vals
+
+
 class ConvertToTStats(ProcessingStep):
     """
     A processing step that converts HbO and HbR data to t-statistics using GLM analysis.
@@ -1692,8 +2577,8 @@ class ConvertToTStats(ProcessingStep):
         
         session.processed_data["t_HbO"] = t_HbO
         session.processed_data["t_HbR"] = t_HbR
-        del session.processed_data["HbO"]
-        del session.processed_data["HbR"]
+        #del session.processed_data["HbO"]
+        #del session.processed_data["HbR"]
 
     def _get_t_stats(self, HbO: np.ndarray, HbR: np.ndarray, protocol) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
         """
@@ -1899,7 +2784,21 @@ class ConvertODtoHbOandHbR(ProcessingStep):
         od_wl2 = session.processed_data["wl2"]
         
         HbO, HbR = self._convert_od_to_hemo(od_wl1, od_wl2)
-        
+        # ---------- NEW: quick HbO/HbR polarity sanity-check -------------
+        # During a typical activation HbO ↑ while HbR ↓  ⇒  corr ≈ −1.
+        # If most channels show a **positive** correlation something is
+        # very likely flipped (wrong Beer–Lambert sign, swapped rows, …).
+        median_corr = np.nanmedian([
+            np.corrcoef(HbO[:, ch], HbR[:, ch])[0, 1]
+            for ch in range(HbO.shape[1])
+        ])
+        if median_corr > 0:
+            print("[OD→Hb]   WARNING: median HbO/HbR correlation is > 0 "
+                  "(expected negative) – check extinction-matrix sign!")
+            # OPTIONAL auto-fix (uncomment if you prefer auto-correction)
+            # HbR *= -1.0
+            # print("[OD→Hb]   Auto-flipped HbR sign to restore polarity.")
+
         session.processed_data["HbO"] = HbO
         session.processed_data["HbR"] = HbR
         del session.processed_data["wl1"]
