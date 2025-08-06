@@ -11,7 +11,7 @@ import torch.nn as nn
 
 from lys.ml.experiment_to_dataset_converter import ExperimentToDatasetConverter
 from lys.ml.splitting_strategies import TemporalSplitter
-from lys.objects.experiment import create_experiment
+from lys.objects.experiment import create_experiment_with_common_channels
 from lys.processing.pipeline import ProcessingPipeline
 from lys.ml.dataset import MLDataset
 
@@ -552,7 +552,7 @@ def plot_losses(train_losses: List[float], val_losses: List[float], batch_size: 
 
 if __name__ == "__main__":
     # Load experiment
-    experiment = create_experiment("perceived_speech", "flow2", use_common_channels=True)
+    experiment = create_experiment_with_common_channels("perceived_speech", "flow2")
     
     pipeline = ProcessingPipeline([])
     experiment = pipeline.apply(experiment)

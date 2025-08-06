@@ -14,7 +14,7 @@ from lys.objects.optodes import Points
 from lys.objects.atlas import Atlas
 from lys.objects.patient import Patient
 from lys.objects.protocol import Protocol
-from lys.objects.experiment import Experiment, create_experiment
+from lys.objects.experiment import Experiment, create_experiment, create_experiment_with_common_channels
 from lys.objects.eigenmodes import Eigenmode, load_eigenmodes
 
 

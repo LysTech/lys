@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import List
-from lys.objects.session import create_session, Session
+from lys.objects.session import create_session, create_session_with_common_channels, Session
 from lys.utils.paths import get_session_paths
 
 @dataclass
@@ -17,8 +17,32 @@ class Experiment:
         return Experiment(f"{self.name}_filtered", self.scanner, filtered_sessions)
 
 
-def create_experiment(experiment_name, scanner_name, use_common_channels=False):
+def create_experiment(experiment_name, scanner_name):
+    """Create an experiment with standard channel configuration.
+    
+    Args:
+        experiment_name: Name of the experiment
+        scanner_name: Name of the scanner device
+        
+    Returns:
+        Experiment instance with sessions using standard channels
+    """
     paths = get_session_paths(experiment_name, scanner_name)
-    sessions = [create_session(p, use_common_channels=use_common_channels) for p in paths]
+    sessions = [create_session(p) for p in paths]
+    return Experiment(experiment_name, scanner_name, sessions)
+
+
+def create_experiment_with_common_channels(experiment_name, scanner_name):
+    """Create an experiment with common channel configuration across sessions.
+    
+    Args:
+        experiment_name: Name of the experiment
+        scanner_name: Name of the scanner device
+        
+    Returns:
+        Experiment instance with sessions using common channels
+    """
+    paths = get_session_paths(experiment_name, scanner_name)
+    sessions = [create_session_with_common_channels(p) for p in paths]
     return Experiment(experiment_name, scanner_name, sessions)
 

@@ -4,7 +4,14 @@ from pathlib import Path
 import numpy as np
 from typing import Dict, List, Sequence
 
-from lys.objects.session import Session, create_session, _load_npz_or_error
+from lys.objects.session import (
+    Session, 
+    create_session, 
+    create_session_with_common_channels,
+    _load_npz_or_error,
+    _load_numpy_formatted_data,
+    _make_session
+)
 from lys.utils.paths import get_session_paths
 from lys.objects import Patient, Protocol, Jacobian
 
@@ -188,82 +195,37 @@ class TestCreateSession:
                 'physio_data': sample_physio_data
             }
 
-    def test_create_session_with_all_files_present(self, mock_session_dependencies, session_path):
-        """Test create_session when all files are present."""
+    def test_create_session_uses_standard_channels_file(self, mock_session_dependencies, session_path):
+        """Test that create_session loads the standard raw_channel_data.npz file."""
         mocks = mock_session_dependencies
         mocks['load_npz'].side_effect = [mocks['raw_data'], mocks['processed_data'], mocks['physio_data']]
         
         session = create_session(session_path)
         
-        # Verify mock calls
-        expected_calls = {
-            'extract_patient': {'args': (session_path,)},
-            'patient_from_name': {'args': ('P01',)},
-            'protocol_from_path': {'args': (session_path,)},
-            'load_jacobians': {'args': (session_path,)}
-        }
-        verify_mock_calls(mocks, expected_calls)
-        assert mocks['load_npz'].call_count == 3
+        # Verify the correct raw data file was requested
+        calls = mocks['load_npz'].call_args_list
+        assert calls[0][0] == (session_path, 'raw_channel_data.npz')  # First call for raw data
+        assert calls[0][1]['required'] == True
         
         # Verify session attributes
-        expected_attrs = {
-            'patient': mocks['patient'],
-            'protocol': mocks['protocol'],
-            'raw_data': mocks['raw_data'],
-            'jacobians': mocks['jacobians'],
-            'processed_data': mocks['processed_data'],
-            'physio_data': mocks['physio_data']
-        }
-        assert_session_attributes(session, expected_attrs)
-        assert session.metadata['processing_steps'] == []
+        assert session.patient == mocks['patient']
+        assert session.raw_data == mocks['raw_data']
 
-    def test_create_session_without_processed_data(self, mock_session_dependencies, session_path):
-        """Test create_session when processed_data.npz is missing - should default to a copy of raw_data."""
+    def test_create_session_with_common_channels_uses_common_channels_file(self, mock_session_dependencies, session_path):
+        """Test that create_session_with_common_channels loads the common channels file."""
         mocks = mock_session_dependencies
-        # processed_data.npz returns None (file not found)
-        mocks['load_npz'].side_effect = [mocks['raw_data'], None, None]
+        mocks['load_npz'].side_effect = [mocks['raw_data'], mocks['processed_data'], mocks['physio_data']]
         
-        session = create_session(session_path)
-        # Key test: processed_data should be a copy of raw_data, not the same object
-        assert session.processed_data is not mocks['raw_data']
-        # but the values should be the same
-        assert session.processed_data is not None
-        assert session.processed_data.keys() == mocks['raw_data'].keys()
-        for key in session.processed_data:
-            np.testing.assert_array_equal(session.processed_data[key], mocks['raw_data'][key])
-        assert session.metadata['processing_steps'] == []
-
-    def test_create_session_with_processed_metadata(self, mock_session_dependencies, session_path):
-        """Test create_session when processed_data contains metadata."""
-        mocks = mock_session_dependencies
-        mock_processed_data_with_metadata = {
-            'wl1': np.array([10, 20, 30]),
-            'metadata': {'processing_steps': ['step1', 'step2'], 'custom_key': 'value'}
-        }
-        mocks['load_npz'].side_effect = [mocks['raw_data'], mock_processed_data_with_metadata, None]
+        session = create_session_with_common_channels(session_path)
         
-        session = create_session(session_path)
+        # Verify the correct raw data file was requested
+        calls = mocks['load_npz'].call_args_list
+        assert calls[0][0] == (session_path, 'raw_channel_data_common_channels.npz')  # First call for raw data
+        assert calls[0][1]['required'] == True
         
-        assert session.processed_data is mock_processed_data_with_metadata
-        assert session.physio_data is None
-        # Key test: metadata should be merged from processed_data
-        assert session.metadata['processing_steps'] == ['step1', 'step2']
-        assert session.metadata['custom_key'] == 'value'
-
-    def test_create_session_without_physio_data(self, mock_session_dependencies, session_path):
-        """Test create_session when physio_data.npz is missing."""
-        mocks = mock_session_dependencies
-        mocks['load_npz'].side_effect = [mocks['raw_data'], None, None]
-        session = create_session(session_path)
-        assert session.physio_data is None
-
-    def test_create_session_missing_raw_data_raises_error(self, mock_session_dependencies, session_path):
-        """Test that create_session raises FileNotFoundError when raw_data.npz is missing."""
-        mocks = mock_session_dependencies
-        mocks['load_npz'].side_effect = FileNotFoundError("Required file 'raw_channel_data.npz' not found")
-        
-        with pytest.raises(FileNotFoundError, match="Required file 'raw_channel_data.npz' not found"):
-            create_session(session_path)
+        # Verify session attributes
+        assert session.patient == mocks['patient']
+        assert session.raw_data == mocks['raw_data']
 
 
 class TestLoadNpzOrError:
@@ -334,3 +296,54 @@ class TestSessionPostInit:
         # Verify processed_data was not overridden
         assert session.processed_data is sample_processed_data
         assert session.processed_data is not session.raw_data 
+
+
+class TestHelperFunctions:
+    """Tests for the refactored helper functions."""
+    
+    def test_load_numpy_formatted_data_loads_all_files(self):
+        """Test that _load_numpy_formatted_data loads all three npz files."""
+        with patch('lys.objects.session._load_npz_or_error') as mock_load:
+            mock_raw = {'wl1': np.array([1, 2, 3])}
+            mock_processed = {'wl1': np.array([10, 20, 30])}
+            mock_physio = {'heart_rate': np.array([60, 65, 70])}
+            mock_load.side_effect = [mock_raw, mock_processed, mock_physio]
+            
+            path = Path('/test/path')
+            raw, processed, physio = _load_numpy_formatted_data(path, 'test_raw.npz')
+            
+            # Verify all files were requested in the correct order
+            calls = mock_load.call_args_list
+            assert len(calls) == 3
+            assert calls[0] == ((path, 'test_raw.npz'), {'required': True})
+            assert calls[1] == ((path, 'processed_channel_data.npz'), {'required': False})
+            assert calls[2] == ((path, 'physio_data.npz'), {'required': False})
+            
+            # Verify return values
+            assert raw == mock_raw
+            assert processed == mock_processed
+            assert physio == mock_physio
+    
+    def test_make_session_creates_session_correctly(self, mock_patient, mock_protocol, mock_jacobians):
+        """Test that _make_session correctly assembles a Session object."""
+        raw_data = {'wl1': np.array([1, 2, 3])}
+        processed_data = {'wl1': np.array([10, 20, 30]), 'metadata': {'processing_steps': ['step1']}}
+        physio_data = {'heart_rate': np.array([60, 65, 70])}
+        
+        session = _make_session(
+            patient=mock_patient,
+            protocol=mock_protocol,
+            jacobians=mock_jacobians,
+            raw_npz=raw_data,
+            processed_npz=processed_data,
+            physio_npz=physio_data
+        )
+        
+        # Verify all attributes are set correctly
+        assert session.patient == mock_patient
+        assert session.protocol == mock_protocol
+        assert session.jacobians == mock_jacobians
+        assert session.raw_data == raw_data
+        assert session.processed_data == processed_data
+        assert session.physio_data == physio_data
+        assert session.metadata == {'processing_steps': ['step1']}  # From processed_data metadata 
