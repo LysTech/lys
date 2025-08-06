@@ -1,5 +1,9 @@
 # Lys
 
+TODO:
+- (lots of #TODO tags throughout the code, grep for them and fix)
+- Anthony can get rid of his copy of bvbabel
+
 ## Table of Contents
 
 - [Virtual environment](#virtual-environment)
@@ -21,10 +25,6 @@
 - [Notes on recording perceived speech data](#notes-on-recording-perceived-speech-data)
   - [Using Audible](#using-audible)
   - [Flow2](#flow2)
-
-TODO:
-- (lots of #TODO tags throughout the code, grep for them and fix)
-- Anthony can get rid of his copy of bvbabel
 
 ## Virtual environment
 We want to all have the same environment, for now we don't use docker or conda, but we may switch to conda once we have multi-language code. For now we just make a clean virtual environment and share a `requirements.txt` file. 
