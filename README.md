@@ -470,67 +470,15 @@ Where for example `dwarkesh_kotkin` contains all 15-minute chunks created from t
   <img src="assets/ps_audio_gui.png" alt="GUI for perceived_speech.py" width="600"/>
 </p>
 
+N.B.: To run the bash scripts below you have to be on a unix/linux based system. You can either use AI to make a Windows equivalent or run in this in your linux subsytem for Windows.
+
 So, once you've got an mp3 file called `my_podcast_name` (inside of `/data/audio/assets`) you can then run `./data_recording/mp3_to_15min_chunks.sh my_podcast_name`. This will create sub-folder named `my_podcast_name`, and sub-sub-folders for each 15 minute chunk.
 
 (n.b. you may have to do `chmod +x mp3_to_15min_chunks.sh` if you can't run it, and same for `transcribe.sh` -- `chmod` is for unix based systems, not sure for Windows).
 
-Then run `data_recording/transcribe.sh my_podcast_name`. This will create transcript files that look a bit like the below example below.
+Then run `data_recording/transcribe.sh my_podcast_name`. 
 
-```
-{
-	"systeminfo": "WHISPER : COREML = 0 | OPENVINO = 0 | Metal : EMBED_LIBRARY = 1 | CPU : NEON = 1 | ARM_FMA = 1 | FP16_VA = 1 | MATMUL_INT8 = 1 | DOTPROD = 1 | ACCELERATE = 1 | REPACK = 1 | ",
-	"model": {
-		"type": "large",
-		"multilingual": true,
-		"vocab": 51866,
-		"audio": {
-			"ctx": 1500,
-			"state": 1280,
-			"head": 20,
-			"layer": 32
-		},
-		"text": {
-			"ctx": 448,
-			"state": 1280,
-			"head": 20,
-			"layer": 4
-		},
-		"mels": 128,
-		"ftype": 1
-	},
-	"params": {
-		"model": "/Users/thomasrialan/Documents/code/whisper.cpp/models/ggml-large-v3-turbo.bin",
-		"language": "en",
-		"translate": false
-	},
-	"result": {
-		"language": "en"
-	},
-	"transcription": [
-		{
-			"timestamps": {
-				"from": "00:00:00,000",
-				"to": "00:00:00,060"
-			},
-			"offsets": {
-				"from": 0,
-				"to": 60
-			},
-			"text": ""
-		},
-		{
-			"timestamps": {
-				"from": "00:00:00,060",
-				"to": "00:00:00,220"
-			},
-			"offsets": {
-				"from": 60,
-				"to": 220
-			},
-			"text": " people"
-		},
-```
-
+And that's it! Now run `data_recording/perceived_speech.py` to start recording data.
 
 ### Using Audible
 [At the moment this is connected to my (Thomas) Audible account, I'm happy to buy us books but it'll be easier if I am here to set this up on your machine as I don't want to paste my password into a (currently public) git repo. If you have an account and want to use that, you can follow the instructions below to set up without me.]
@@ -546,23 +494,9 @@ audible activation-bytes #this gives some number, here "7935c812"
 ffmpeg -activation_bytes 7935c812 -i "./audiobooks/Churchill_Walking_with_Destiny-LC_64_22050_stereo.aax" -c:a libmp3lame "./audiobooks/churchill.mp3" #converts .aax file to .mp3
 ```
 
-### whisper.cpp for audio transcription
-
-Then this `.mp3` needs to be transcribed so that each word is timestamped. We do this with [whisper.cpp](https://github.com/ggml-org/whisper.cpp) for performance. Claude estimates this to have ~20ms accuracy which is good enough for NIRS/EEG.
-
-To generate a transcript, clone and make the `whisper.cpp` repo, download a model (`large-v3-turbo` is good, smaller models seem quite bad) like this:
-
-```bash
-bash ./models/download-ggml-model.sh large-v3-turbo
-```
-
-### A full example
-
 
 ### Flow2
 Currently we have to manually start and stop the Flow2 recording, however pre-processing takes care of aligning timestamps. Our `TaskExecutor` uses the [Kernel Tasks SDK](https://docs.kernel.com/docs/kernel-tasks-sdk) to send an event to the `.snirf` when we press "play" on the GUI. 
-
-You can run `examples/task_demo.py`, for this to work you need at least some audio files. 
 
 Current steps:
 1. Do the steps on the Kernel portal to get the recording started (tune the lasers, etc...),
