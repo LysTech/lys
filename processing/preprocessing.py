@@ -1,3 +1,4 @@
+from typing import Set, Tuple
 from pathlib import Path
 import numpy as np
 import snirf
@@ -444,6 +445,237 @@ def preprocess_experiment(experiment_name: str, scanner_name: str) -> None:
             raise
 
 
+def preprocess_experiment_with_common_channels(experiment_name: str, scanner_name: str) -> None:
+    """
+    Preprocess all sessions for an experiment and create common channel files.
+    
+    This function:
+    1. Preprocesses all sessions in the experiment (creating raw_channel_data.npz)
+    2. Identifies channels that are active across ALL sessions
+    3. Creates raw_channel_data_common_channels.npz files containing only common channels
+    
+    The common channels approach ensures all sessions have the same channel configuration,
+    which is necessary for some ML pipelines. Note that Kernel's preprocessing removes
+    bad channels from the SNIRF files, so different sessions may have different active channels.
+    
+    NOTE: Currently only supports Flow2 devices, as other devices don't have explicit
+    channel information in their data format.
+    
+    Args:
+        experiment_name: Name of the experiment (e.g., 'perceived_speech')
+        scanner_name: Name of the scanner/device (must be 'flow2')
+        
+    Raises:
+        FileNotFoundError: If no sessions are found
+        ValueError: If scanner is not 'flow2' or sessions have incompatible channel data
+        AssertionError: If data consistency checks fail
+    """
+    
+    # Step 1: Get all session paths
+    session_paths = get_session_paths(experiment_name, scanner_name)
+    
+    if not session_paths:
+        raise FileNotFoundError(
+            f"No sessions found for experiment '{experiment_name}' with scanner '{scanner_name}'"
+        )
+    
+    print(f"Found {len(session_paths)} sessions for experiment '{experiment_name}' with scanner '{scanner_name}'")
+    
+    # Step 2: Preprocess all sessions normally (creates raw_channel_data.npz)
+    print("\n📝 Step 1: Preprocessing all sessions...")
+    for i, session_path in enumerate(session_paths, 1):
+        print(f"  [{i}/{len(session_paths)}] Processing {session_path.name}...")
+        try:
+            RawSessionPreProcessor.preprocess(session_path)
+        except Exception as e:
+            print(f"    ❌ Failed to preprocess {session_path}: {e}")
+            raise
+    
+    print("✅ All sessions preprocessed successfully")
+    
+    # Step 3: Load all sessions and identify common channels
+    print("\n🔍 Step 2: Identifying common channels across all sessions...")
+    
+    all_session_channels = []
+    all_session_data = []
+    
+    for session_path in session_paths:
+        npz_path = session_path / 'raw_channel_data.npz'
+        
+        # Validate that the file exists
+        assert npz_path.exists(), (
+            f"Expected raw_channel_data.npz not found at {npz_path}. "
+            "Preprocessing may have failed."
+        )
+        
+        # Load the data
+        data = np.load(npz_path, allow_pickle=True)
+        
+        # Extract channels based on scanner type
+        channels = _extract_channels_from_npz(data, scanner_name)
+        
+        all_session_channels.append(channels)
+        all_session_data.append((session_path, data))
+        
+        print(f"  • {session_path.name}: {len(channels)} active channels")
+    
+    # Find intersection of all channel sets
+    common_channels = _find_common_channels(all_session_channels)
+    
+    if not common_channels:
+        raise ValueError(
+            "No common channels found across all sessions. "
+            "This may indicate that the sessions have very different channel configurations "
+            "or that all channels were marked as bad in at least one session."
+        )
+    
+    print(f"\n✅ Found {len(common_channels)} common channels across all sessions")
+    
+    # Calculate how many channels were dropped per session
+    for i, (session_path, _) in enumerate(all_session_data):
+        original_count = len(all_session_channels[i])
+        dropped_count = original_count - len(common_channels)
+        if dropped_count > 0:
+            print(f"  • {session_path.name}: dropping {dropped_count} channels ({original_count} → {len(common_channels)})")
+    
+    # Step 4: Create new npz files with only common channels
+    print("\n💾 Step 3: Creating raw_channel_data_common_channels.npz files...")
+    
+    for session_path, data in all_session_data:
+        output_path = session_path / 'raw_channel_data_common_channels.npz'
+        
+        # Extract only the common channels from this session's data
+        filtered_data = _filter_data_to_common_channels(
+            data, common_channels, scanner_name
+        )
+        
+        # Save the filtered data
+        np.savez(output_path, **filtered_data)
+        print(f"  ✅ Created {output_path.name} for {session_path.name}")
+    
+    print(f"\n🎉 Successfully created common channel files for {len(session_paths)} sessions")
+    print(f"   Each file contains {len(common_channels)} channels")
+
+
+def _extract_channels_from_npz(data: dict, scanner_name: str) -> Set[Tuple]:
+    """
+    Extract channel identifiers from an npz data dictionary.
+    
+    Args:
+        data: Dictionary loaded from npz file
+        scanner_name: Name of the scanner to determine data format
+        
+    Returns:
+        Set of channel identifiers (format depends on scanner type)
+    """
+    if scanner_name == 'flow2':
+        # For Flow2, channels are stored as a list of (source, detector) tuples
+        if 'channels' not in data:
+            raise ValueError(
+                "Flow2 data missing 'channels' key. "
+                "Ensure the Flow2MomentsSessionPreprocessor was used."
+            )
+        
+        channels = data['channels']
+        
+        # Convert to set of tuples for easy intersection
+        if isinstance(channels, np.ndarray):
+            # Handle numpy array of tuples
+            return set(map(tuple, channels))
+        else:
+            # Already a list of tuples
+            return set(channels)
+    else:
+        # Other scanners don't have explicit channel information
+        raise ValueError(
+            f"Scanner type '{scanner_name}' does not have explicit channel information. "
+            f"The 'channels' key is expected only for Flow2 devices. "
+            f"Common channel preprocessing is currently only supported for Flow2."
+        )
+
+
+def _find_common_channels(all_channels: list) -> Set[Tuple]:
+    """
+    Find the intersection of channels across all sessions.
+    
+    Args:
+        all_channels: List of channel sets, one per session
+        
+    Returns:
+        Set of channels present in ALL sessions
+    """
+    assert all_channels, "No channels provided"
+    assert all(isinstance(ch, set) for ch in all_channels), "All channel collections must be sets"
+    
+    # Start with first session's channels
+    common = all_channels[0].copy()
+    
+    # Intersect with each subsequent session
+    for session_channels in all_channels[1:]:
+        common = common.intersection(session_channels)
+    
+    return common
+
+
+def _filter_data_to_common_channels(data: dict, common_channels: Set[Tuple], scanner_name: str) -> dict:
+    """
+    Filter session data to include only common channels.
+    
+    Args:
+        data: Original session data dictionary
+        common_channels: Set of channels to keep
+        scanner_name: Name of the scanner to determine data format
+        
+    Returns:
+        Filtered data dictionary with only common channels
+    """
+    if scanner_name != 'flow2':
+        raise ValueError(
+            f"Scanner type '{scanner_name}' is not supported for common channel filtering. "
+            f"Common channel preprocessing is currently only supported for Flow2 devices."
+        )
+    
+    filtered = {}
+    
+    # For Flow2, we need to filter the data array and update the channels list
+    
+    # Get original channels
+    original_channels = data['channels']
+    if isinstance(original_channels, np.ndarray):
+        original_channels = list(map(tuple, original_channels))
+    
+    # Find indices of common channels in original data
+    channel_indices = []
+    filtered_channels = []
+    
+    for i, ch in enumerate(original_channels):
+        if tuple(ch) in common_channels:
+            channel_indices.append(i)
+            filtered_channels.append(ch)
+    
+    # Validate we found all common channels
+    assert len(filtered_channels) == len(common_channels), (
+        f"Could not find all common channels in session data. "
+        f"Expected {len(common_channels)}, found {len(filtered_channels)}"
+    )
+    
+    # Filter the data array (n_timepoints, n_channels, n_wavelengths, n_moments)
+    original_data = data['data']
+    filtered_data = original_data[:, channel_indices, :, :]
+    
+    # Copy all keys, replacing 'data' and 'channels'
+    for key in data.keys():
+        if key == 'data':
+            filtered[key] = filtered_data
+        elif key == 'channels':
+            filtered[key] = np.array(filtered_channels)
+        else:
+            # Copy other fields as-is (time, wavelengths, moment_names, etc.)
+            filtered[key] = data[key]
+    
+    return filtered
+
+
 if __name__=="__main__":
     import os
     from lys.utils.paths import lys_subjects_dir
@@ -452,5 +684,6 @@ if __name__=="__main__":
     
     processor = Flow2MomentsSessionPreprocessor()
     data = processor.extract_data(session_path)
-    RawSessionPreProcessor.preprocess(session_path)
+    #RawSessionPreProcessor.preprocess(session_path)
     
+
