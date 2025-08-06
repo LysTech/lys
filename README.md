@@ -454,7 +454,7 @@ We want to be able to record Flow2 data while someone is listening to any audio.
 1. Get an `.mp3` file
 2. Get a good transcription of the audio, with precise timestamps
 3. Put them in the right place in our data folder so that the code knows where to find it
-4. Run `data_recording/perceived_speech.py`, and use the GUI to click `play`.
+4. Run `data_recording/perceived_speech.py`, and use the GUI to click `play` (while wearing the Flow2)
 
 First you need to get an `.mp3` file. With youtube, you can just use [an online tool like this one](https://ytmp3.cx/) to get the `mp3`. Audible is a little more tricky, instructions a bit below.
 
