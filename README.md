@@ -458,6 +458,8 @@ We want to be able to record Flow2 data while someone is listening to any audio.
 
 First you need to get an `.mp3` file. With youtube, you can just use [an online tool like this one](https://ytmp3.cx/) to get the `mp3`. Audible is a little more tricky, instructions a bit below.
 
+We use (whisper.cpp)[https://github.com/ggml-org/whisper.cpp] to do transcription, please follow their instructions ("Quick Start" section) to clone and make the repo, then download the `ggml-large-v3-turbo.bin` model.
+
 This is the expected data structure:
 
 <p align="center">
@@ -472,11 +474,11 @@ Where for example `dwarkesh_kotkin` contains all 15-minute chunks created from t
   <img src="assets/ps_audio_gui.png" alt="GUI for perceived_speech.py" width="600"/>
 </p>
 
-N.B.: To run the bash scripts below you have to be on a unix/linux based system. You can either use AI to make a Windows equivalent or run in this in your linux subsytem for Windows.
+*N.B.: To run the bash scripts below you have to be on a unix/linux based system. You can either use AI to make a Windows equivalent or run in this in your linux subsytem for Windows.*
 
 So, once you've got an mp3 file called `my_podcast_name` (inside of `/data/audio/assets`) you can then run `./data_recording/mp3_to_15min_chunks.sh my_podcast_name`. This will create sub-folder named `my_podcast_name`, and sub-sub-folders for each 15 minute chunk.
 
-(n.b. you may have to do `chmod +x mp3_to_15min_chunks.sh` if you can't run it, and same for `transcribe.sh` -- `chmod` is for unix based systems, not sure for Windows).
+(N.B. you may have to do `chmod +x mp3_to_15min_chunks.sh` if you can't run it, and same for `transcribe.sh`).
 
 Then run `data_recording/transcribe.sh my_podcast_name`. 
 
