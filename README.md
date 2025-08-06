@@ -449,6 +449,12 @@ Each eigenmode is represented as an `Eigenmode` object, which is a subclass of `
 
 ## Notes on recording perceived speech data
 
+Pre-requisities:
+1. You need to install `whisper.cpp` (instructions below)
+2. You need to have the right directory structure (details below)
+3. You need to have a `LYS_DATA_DIR` environment variable defined (as explained elsewhere in these docs)
+4. You need `ffmpeg` installed
+
 We want to be able to record Flow2 data while someone is listening to any audio. This is an overview of how we currently do this, with instructions for how to setup on your personal machine. We currently explicitly support youtube videos and audible books, but this probably works for other stuff with minimal changes. At a high level what needs to happen is this: 
 
 1. Get an `.mp3` file
@@ -458,7 +464,7 @@ We want to be able to record Flow2 data while someone is listening to any audio.
 
 First you need to get an `.mp3` file. With youtube, you can just use [an online tool like this one](https://ytmp3.cx/) to get the `mp3`. Audible is a little more tricky, instructions a bit below.
 
-We use (whisper.cpp)[https://github.com/ggml-org/whisper.cpp] to do transcription, please follow their instructions ("Quick Start" section) to clone and make the repo, then download the `ggml-large-v3-turbo.bin` model.
+We use (whisper.cpp)[https://github.com/ggml-org/whisper.cpp] to do transcription, please follow their instructions ("Quick Start" section) to clone and make the repo, then download the `ggml-large-v3-turbo.bin` model. The most likely way for things to go wrong here is if the whisper repo is placed in the wrong folder, the bash scripts expect it to be in the same folder that contains the parent directory of LYS_DATA_DIR (for example, on my machine the data dir is `/Users/thomasrialan/Documents/code/Geometric-eigenmodes/data` and the bash script will look for whisper in `/Users/thomasrialan/Documents/code`).
 
 This is the expected data structure:
 
