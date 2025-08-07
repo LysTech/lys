@@ -44,7 +44,7 @@ config = [
     #{"BandpassFilter": {"lower_bound": 0.01, "upper_bound": 0.1}},
     {"ExtractHRFviaCanonicalFit": {
         "tmin":  -5,
-        "tmax":  30,
+        "tmax":  20,
         "tau_grid":   np.arange(0.6, 1.45, 0.05),
         "delay_grid": np.arange(-2.0, 2.25, 0.25),
         "ratio_grid": np.arange(0.10, 0.35, 0.05),
@@ -56,11 +56,11 @@ config = [
         {"num_eigenmodes": 390,
          "lambda_selection": "corr",
          "mu_fixed": 0.1}},
-    {"ReconstructSpatioTemporalEvolutionOLD": {
+    {"ReconstructSpatioTemporalEvolution": {
         "num_eigenmodes": 390,
-        "lambda_reg": 1e3,
+        "lambda_reg": 5e3,
         "tmin": -5,
-        "tmax": 30,
+        "tmax": 20,
         "window": "hann"
     }},
 ]
@@ -104,8 +104,9 @@ print(f"\nAverage fMRI–fNIRS correlation: {avg*100:5.2f}% "
 
 ms_td = TimeSeriesMeshData(mesh, experiment.sessions[0].processed_data["neural_recon"]["HbO"]["MS"])
 md_td = TimeSeriesMeshData(mesh, experiment.sessions[0].processed_data["neural_recon"]["HbO"]["MD"])
+md_td_neural = TimeSeriesMeshData(mesh, experiment.sessions[0].processed_data["neural_recon"]["neural"]["MD"])
 dscene = VTKScene(title = "Spatio-temporal reconstruction of mental drawing (MD)")
-dscene.add(md_td)
+dscene.add(md_td_neural)
 dscene.show()
 
 md_mean = np.mean(experiment.sessions[0].processed_data["neural_recon"]["HbO"]["MD"], axis=1)
@@ -114,7 +115,94 @@ sdata = StaticMeshData(mesh, md_mean)
 scene.add(sdata)
 scene.show()
 
-scene2 = VTKScene("Time-independent reconstruction of mental drawing (MD)")
+scene2 = VTKScene(title = "Time-independent reconstruction of mental drawing (MD)")
 sdata2 = StaticMeshData(mesh, recon_maps["HbO"][(0,"MD")])
 scene2.add(sdata2)
 scene2.show()
+
+scene_fmri = VTKScene(title = "fMRI t-stat map")
+fmri_data = StaticMeshData(mesh, get_mri_tstats(experiment.sessions[0].patient.name, "MD"))
+scene_fmri.add(fmri_data)
+scene_fmri.show()
+
+# ------------------------------------------------------------------
+# ---------- 5)  Z-normalise maps for fair comparison --------------
+# ------------------------------------------------------------------
+import numpy as np
+from lys.objects.mesh import TimeSeriesMeshData, StaticMeshData
+from lys.visualization import VTKScene
+
+# -------- helper – robust z-score (median / MAD) ------------------
+def robust_z(x: np.ndarray) -> np.ndarray:
+    """Return (x − median) / MAD with ε-guard against divide-by-zero."""
+    med = np.median(x)
+    mad = np.median(np.abs(x - med))
+    return (x - med) / (mad + 1e-12)
+
+
+# ------------------------------------------------------------------
+# 6)  Spatio-temporal z-maps   (per-frame robust z-scoring)
+# ------------------------------------------------------------------
+sess0 = experiment.sessions[0]          # shorthand
+
+# ----- Mental-subtraction (MS) ------------------------------------
+ms_raw = sess0.processed_data["neural_recon"]["HbO"]["MS"]   # shape (V, T)
+ms_z   = np.apply_along_axis(robust_z, 0, ms_raw)            # z per frame
+ms_td  = TimeSeriesMeshData(mesh, ms_z)
+
+scene_ms = VTKScene(title="Spatio-temporal z-map – mental subtraction (MS)")
+scene_ms.add(ms_td).show()
+
+
+# ----- Mental-drawing (MD) ---------------------------------------
+md_raw = sess0.processed_data["neural_recon"]["neural"]["MD"]
+md_z   = np.apply_along_axis(robust_z, 0, md_raw)
+md_td  = TimeSeriesMeshData(mesh, md_z)
+
+scene_md = VTKScene(title="Spatio-temporal z-map – mental drawing (MD)")
+scene_md.add(md_td).show()
+
+
+# ------------------------------------------------------------------
+# 7)  Static maps (temporal mean + time-independent recon)
+# ------------------------------------------------------------------
+
+# ---- (a)  Mean over time of MD spatio-temporal recon ------------
+md_mean_raw = np.mean(md_raw, axis=1)        # (V,)
+md_mean_z   = robust_z(md_mean_raw)
+sdata_mean  = StaticMeshData(mesh, md_mean_z)
+
+scene_mean = VTKScene(title="Mean z-map – mental drawing (MD)")
+scene_mean.add(sdata_mean).show()
+
+
+# ---- (b)  Time-independent dual reconstruction of MD ------------
+dual_raw = recon_maps["HbO"][(0, "MD")]      # (V,)
+dual_z   = robust_z(dual_raw)
+sdata_dual = StaticMeshData(mesh, dual_z)
+
+scene_dual = VTKScene(title="Time-independent z-map – mental drawing (MD)")
+scene_dual.add(sdata_dual).show()
+
+# ------------------------------------------------------------------
+# 6)  Vertex-wise z-score across time  -----------------------------
+#     (keeps true amplitude relationships between frames)
+# ------------------------------------------------------------------
+
+def z_along_time(mat_VT: np.ndarray) -> np.ndarray:
+    """
+    Robust z-score *per vertex* across its time-course.
+    Input shape (V, T) – returns same shape.
+    """
+    med  = np.median(mat_VT, axis=1, keepdims=True)
+    mad  = np.median(np.abs(mat_VT - med), axis=1, keepdims=True)
+    return (mat_VT - med) / (mad + 1e-12)
+
+ms_z = z_along_time(ms_raw)          # shape (V, T)
+md_z = z_along_time(md_raw)
+
+ms_td = TimeSeriesMeshData(mesh, ms_z)
+md_td = TimeSeriesMeshData(mesh, md_z)
+
+VTKScene("Vertex-wise z-map – MS").add(ms_td).show()
+VTKScene("Vertex-wise z-map – MD").add(md_td).show()
