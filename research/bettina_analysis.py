@@ -1,12 +1,15 @@
 #external imports
 import numpy as np
 import matplotlib
+
+from lys.objects import TimeSeriesMeshData
+
 matplotlib.use("Agg")
 
 #internal imports
 from lys.visualization import VTKScene
 from lys.objects.experiment import create_experiment
-from lys.objects.mesh import StaticMeshData
+from lys.objects.mesh import StaticMeshData, TimeSeriesMeshData
 from lys.objects.jacobian import jacobian_to_vertex_val
 from lys.processing.pipeline import ProcessingPipeline
 from lys.utils.mri_tstat import get_mri_tstats
@@ -15,7 +18,7 @@ from lys.processing.steps import plot_hrf
 # create experiment
 experiment_name = "8classes"
 experiment = create_experiment(experiment_name, "nirs")
-#experiment.sessions = experiment.sessions[3:4]
+experiment.sessions = experiment.sessions[3:4]
 
 
 """ Check mesh and volume alignmnent """
@@ -50,9 +53,16 @@ config = [
     }},
     {"ConvertToTStatsWithExtractedHRF": {}},
     {"ReconstructDualWithoutBadChannels":
-        {"num_eigenmodes": 290,
+        {"num_eigenmodes": 390,
          "lambda_selection": "corr",
          "mu_fixed": 0.1}},
+    {"ReconstructSpatioTemporalEvolutionOLD": {
+        "num_eigenmodes": 390,
+        "lambda_reg": 1e3,
+        "tmin": -5,
+        "tmax": 30,
+        "window": "hann"
+    }},
 ]
 
 processing_pipeline = ProcessingPipeline(config)
@@ -91,3 +101,20 @@ avg, mn, mx = np.mean(corr_vals), np.min(corr_vals), np.max(corr_vals)
 print(f"\nAverage fMRI–fNIRS correlation: {avg*100:5.2f}% "
       f"(min {mn*100:5.2f}% / max {mx*100:5.2f}%)")
 
+
+ms_td = TimeSeriesMeshData(mesh, experiment.sessions[0].processed_data["neural_recon"]["HbO"]["MS"])
+md_td = TimeSeriesMeshData(mesh, experiment.sessions[0].processed_data["neural_recon"]["HbO"]["MD"])
+dscene = VTKScene(title = "Spatio-temporal reconstruction of mental drawing (MD)")
+dscene.add(md_td)
+dscene.show()
+
+md_mean = np.mean(experiment.sessions[0].processed_data["neural_recon"]["HbO"]["MD"], axis=1)
+scene = VTKScene(title = "Temporally averaged spatio-temporal reconstruction of mental drawing (MD)")
+sdata = StaticMeshData(mesh, md_mean)
+scene.add(sdata)
+scene.show()
+
+scene2 = VTKScene("Time-independent reconstruction of mental drawing (MD)")
+sdata2 = StaticMeshData(mesh, recon_maps["HbO"][(0,"MD")])
+scene2.add(sdata2)
+scene2.show()

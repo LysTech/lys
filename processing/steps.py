@@ -41,20 +41,101 @@ from lys.abstract_interfaces.processing_step import ProcessingStep
 import matplotlib.pyplot as plt
 from typing import Sequence, Union
 
+# def plot_hrf(session,
+#              tasks:      Union[None, str, Sequence[str]] = None,
+#              channels:   Union[str, int, Sequence[int]] = "mean",
+#              colors:     tuple[str, str] = ("C0", "C3"),
+#              outfile:    str = "hrf.png",
+#              *,
+#              block_averaging: str = "all"):
+#     """
+#     Grand‑average HRF (HbO & HbR).
+#
+#     The *block_averaging* argument must match the setting that was used
+#     when **ExtractHRF** ran on this session.  It is stored only for
+#     user clarity – the plotting routine itself uses whatever HRF was
+#     extracted earlier.
+#     """
+#     if block_averaging not in ("all", "longest"):
+#         raise ValueError("block_averaging must be 'all' or 'longest'")
+#
+#     hrf   = session.processed_data["hrf"]
+#     t     = hrf["time"]                                # (L,)
+#
+#     # -------- task selection -------------------------------------------
+#     if tasks is None:                    # all tasks
+#         sel_tasks = list(hrf["HbO"].keys())
+#     elif isinstance(tasks, str):         # single task
+#         if tasks not in hrf["HbO"]:
+#             raise ValueError(f"Task '{tasks}' not found in HRF data.")
+#         sel_tasks = [tasks]
+#     else:                                # explicit list/tuple
+#         sel_tasks = list(tasks)
+#         missing   = set(sel_tasks) - set(hrf["HbO"])
+#         if missing:
+#             raise ValueError(f"Unknown task(s): {', '.join(missing)}")
+#
+#     # -------- good / bad channel bookkeeping ---------------------------
+#     bad   = np.asarray(session.processed_data.get("bad_channels", []), int)
+#     C_tot = next(iter(hrf["HbO"].values())).shape[1]
+#     good  = np.setdiff1d(np.arange(C_tot), bad, assume_unique=True)
+#
+#     # -------- channel selection ----------------------------------------
+#     if channels == "mean":
+#         sel_ch = good
+#     elif isinstance(channels, int):
+#         if channels in bad:
+#             raise ValueError(f"Channel {channels} was flagged bad.")
+#         sel_ch = np.asarray([channels])
+#     else:
+#         sel_ch = np.setdiff1d(np.asarray(channels, int), bad, assume_unique=True)
+#         if sel_ch.size == 0:
+#             raise ValueError("All requested channels are bad.")
+#
+#     # -------------------------------------------------------------------
+#     plt.figure(figsize=(6, 3))
+#
+#     for key, col in zip(("HbO", "HbR"), colors):
+#         mats = np.stack([hrf[key][task] for task in sel_tasks], axis=0)  # (T, L, C)
+#         grand = mats.mean(axis=0)             # (L, C) average over tasks
+#         sel   = grand[:, sel_ch]
+#         mu = np.nanmean(sel, axis=1)
+#         sd = np.nanstd(sel, axis=1)
+#         plt.plot(t, mu, color=col, label=key)
+#         if sel_ch.size > 1:
+#             plt.fill_between(t, mu - sd, mu + sd, color=col, alpha=0.4, linewidth=0)
+#
+#     # -------- cosmetics -------------------------------------------------
+#     plt.axvline(0, lw=.6, color="k")
+#     plt.xlabel("Time [s]")
+#     plt.ylabel("ΔµM (baseline‑zeroed)")
+#     plt.title("Session‑averaged HRF (μ ± σ)")
+#     plt.legend(frameon=False, fontsize=8)
+#     plt.tight_layout()
+#     plt.savefig(outfile)
+#     plt.close()
+
 def plot_hrf(session,
              tasks:      Union[None, str, Sequence[str]] = None,
              channels:   Union[str, int, Sequence[int]] = "mean",
              colors:     tuple[str, str] = ("C0", "C3"),
              outfile:    str = "hrf.png",
+             outfile_fft: str = "hrf_fft.png",
              *,
              block_averaging: str = "all"):
     """
-    Grand‑average HRF (HbO & HbR).
+    Grand-average HRF (HbO & HbR) plus its Fourier-amplitude spectrum.
 
     The *block_averaging* argument must match the setting that was used
     when **ExtractHRF** ran on this session.  It is stored only for
     user clarity – the plotting routine itself uses whatever HRF was
     extracted earlier.
+
+    Two files are written:
+
+      • *outfile*       – time-domain HRF plot (default ``hrf.png``)
+      • *outfile_fft*   – magnitude spectrum of the HbO HRF
+                          (default ``hrf_fft.png``)
     """
     if block_averaging not in ("all", "longest"):
         raise ValueError("block_averaging must be 'all' or 'longest'")
@@ -75,7 +156,7 @@ def plot_hrf(session,
         if missing:
             raise ValueError(f"Unknown task(s): {', '.join(missing)}")
 
-    # -------- good / bad channel bookkeeping ---------------------------
+    # -------- good / bad channel bookkeeping ---------------------------
     bad   = np.asarray(session.processed_data.get("bad_channels", []), int)
     C_tot = next(iter(hrf["HbO"].values())).shape[1]
     good  = np.setdiff1d(np.arange(C_tot), bad, assume_unique=True)
@@ -94,6 +175,7 @@ def plot_hrf(session,
 
     # -------------------------------------------------------------------
     plt.figure(figsize=(6, 3))
+    mu_HbO = None                                    # will store mean HbO HRF
 
     for key, col in zip(("HbO", "HbR"), colors):
         mats = np.stack([hrf[key][task] for task in sel_tasks], axis=0)  # (T, L, C)
@@ -105,15 +187,35 @@ def plot_hrf(session,
         if sel_ch.size > 1:
             plt.fill_between(t, mu - sd, mu + sd, color=col, alpha=0.4, linewidth=0)
 
+        if key == "HbO":                       # capture for Fourier spectrum
+            mu_HbO = mu.copy()
+
     # -------- cosmetics -------------------------------------------------
     plt.axvline(0, lw=.6, color="k")
-    plt.xlabel("Time [s]")
-    plt.ylabel("ΔµM (baseline‑zeroed)")
-    plt.title("Session‑averaged HRF (μ ± σ)")
+    plt.xlabel("Time [s]")
+    plt.ylabel("ΔµM (baseline-zeroed)")
+    plt.title("Session-averaged HRF (μ ± σ)")
     plt.legend(frameon=False, fontsize=8)
     plt.tight_layout()
     plt.savefig(outfile)
     plt.close()
+
+    # ---------- Fourier spectrum ---------------------------------------
+    if mu_HbO is not None:
+        dt    = np.mean(np.diff(t))                 # sampling period
+        freqs = np.fft.rfftfreq(mu_HbO.size, dt)    # one-sided frequencies
+        amp   = np.abs(np.fft.rfft(mu_HbO))         # magnitude spectrum
+
+        plt.figure(figsize=(6, 3))
+        plt.plot(freqs, amp, color=colors[0])
+        plt.xlabel("Frequency [Hz]")
+        plt.ylabel("|H(f)|")
+        plt.title("Fourier spectrum of HRF (HbO mean)")
+        plt.tight_layout()
+        plt.savefig(outfile_fft)
+        plt.close()
+
+
 
 # ------------------------------------------------------------------
 # ↓↓↓ 1) ExtractHRF with block_averaging option  ↓↓↓
@@ -2370,6 +2472,422 @@ class ReconstructDualWithoutBadChannels(ProcessingStep):
 
 # ─── convert_to_tstats.py ──────────────────────────────────────────────
 
+# ─── steps.py ──────────────────────────────────────────────────────────────
+import numpy as np
+from numpy.fft import rfft, irfft, rfftfreq
+import pywt                                 # only needed for the wavelet mode
+from lys.abstract_interfaces.processing_step import ProcessingStep
+from typing import Tuple, Dict, Literal, Optional
+
+# ─── steps.py  (append at the end of the file) ──────────────────────────
+import numpy as np
+from numpy.fft import rfft, irfft, rfftfreq
+from scipy.signal import windows
+from typing import Dict, List, Optional
+
+from lys.abstract_interfaces.processing_step import ProcessingStep
+from lys.objects import Session
+
+# Make sure the canonical_hrf function is in scope; it lives in the same
+# module that already defines ExtractHRFviaCanonicalFit.
+# from your_module import canonical_hrf
+
+# --------------------------------------------------------------------- #
+#  ReconstructSpatioTemporalEvolution – task-wise spatio-temporal solver
+# --------------------------------------------------------------------- #
+class ReconstructSpatioTemporalEvolutionOLD(ProcessingStep):
+    """
+    Task-wise dual-wavelength eigen-mode reconstruction of the neural
+    *time-course* on the cortical mesh.
+
+    Parameters
+    ----------
+    num_eigenmodes : int
+        Number of Laplace eigen-modes to use (after skipping the first 2).
+    lambda_reg : float
+        Spatial Tikhonov weight λ that multiplies the eigen-values.
+    mu : float, optional
+        Coupling strength μ between HbO and HbR (default 0.1).
+    rho : float, optional
+        Expected HbR/HbO ratio (default −0.6).
+    tmin, tmax : float, optional
+        Window [s] relative to each onset that is reconstructed
+        (default −5 … +30 s).
+    window : {"hann", "tukey", None}, optional
+        Optional time-domain taper applied before the FFT (default "hann").
+    """
+
+    # ------------------------------------------------------------------ #
+    def __init__(self,
+                 num_eigenmodes: int,
+                 lambda_reg: float = 1e-2,
+                 *,
+                 mu: float = 0.1,
+                 rho: float = -0.6,
+                 tmin: float = -5.0,
+                 tmax: float = 30.0,
+                 window: Optional[str] = "hann") -> None:
+        self.num_eigenmodes = int(num_eigenmodes)
+        self.lambda_reg     = float(lambda_reg)
+        self.mu             = float(mu)
+        self.rho            = float(rho)
+        self.tmin           = float(tmin)
+        self.tmax           = float(tmax)
+        self.window         = window
+
+    # ================================================================== #
+    # helpers
+    # ================================================================== #
+    @staticmethod
+    def _compute_Bmn(vertex_jac: np.ndarray,
+                     phi: np.ndarray) -> np.ndarray:
+        """
+        Contract vertex-Jacobian (N,S,D) with eigen-basis (N,M) to
+        Bmn (S·D, M), using Fortran ordering so *sources vary fastest*.
+        """
+        B_sdm = np.einsum("nsd,nm->sdm", vertex_jac, phi)     # (S,D,M)
+        S, D, M = B_sdm.shape
+        return B_sdm.reshape(S * D, M, order="F")             # (S·D,M)
+
+    # ================================================================== #
+    # main entry
+    # ================================================================== #
+    def _do_process(self, session: "Session") -> None:        # noqa: N802
+        # ---------------- raw data ------------------------------------
+        HbO = session.processed_data["HbO"]        # (T,C)
+        HbR = session.processed_data["HbR"]
+        fs  = globals().get("fs", 3.4722)          # Hz
+        C_tot = HbO.shape[1]                       # S·D channels
+
+        # ---------------- eigen-basis ---------------------------------
+        verts = session.patient.mesh.vertices
+        eig_modes = session.patient.mesh.eigenmodes
+        if eig_modes is None:
+            raise RuntimeError("Mesh eigen-modes are missing.")
+
+        start, end = 2, 2 + self.num_eigenmodes
+        phi = np.vstack(eig_modes[start:end]).T                # (V,M)
+        eigvals = np.array([em.eigenvalue for em in eig_modes[start:end]],
+                           dtype=float)
+        eigvals[0] = 0.0                                        # λ₀ = 0
+
+        # ---------------- Jacobian → Bmn -----------------------------
+        vj1 = session.jacobians[0].sample_at_vertices(verts)
+        vj2 = session.jacobians[1].sample_at_vertices(verts)
+        B1  = self._compute_Bmn(vj1, phi)                       # (C_tot,M)
+        B2  = self._compute_Bmn(vj2, phi)
+
+        # ---------------- extinction coefficients --------------------
+        eps_O1, eps_R1 = 586.0,   1548.52
+        eps_O2, eps_R2 = 1058.0,   691.32
+
+        # Wavelength blocks
+        M1 = np.hstack((eps_O1 * B1, eps_R1 * B1))              # (C_tot,2M)
+        M2 = np.hstack((eps_O2 * B2, eps_R2 * B2))              # (C_tot,2M)
+        B_full = np.vstack((M1, M2))                            # (2C_tot,2M)
+        BtB = B_full.T @ B_full
+        Bt  = B_full.T
+
+        # ---------------- regularisers -------------------------------
+        Lambda = np.diag(np.tile(eigvals, 2)) * self.lambda_reg
+        n = eigvals.size
+        I = np.eye(n)
+        C_cpl = self.mu * np.block([[ self.rho ** 2 * I, -self.rho * I],
+                                    [-self.rho * I,        I        ]])
+
+        # Constant system matrix (2M × 2M) & its inverse
+        A_mat = BtB + Lambda + C_cpl
+        A_inv = np.linalg.inv(A_mat)                            # (2M,2M)
+
+        # ---------------- HRF spectrum -------------------------------
+        hrf_dict = session.processed_data["hrf"]
+        hrf_kernel = canonical_hrf(hrf_dict["time"],
+                                   tau   = hrf_dict.get("tau",   1.0),
+                                   delay = hrf_dict.get("delay", 0.0),
+                                   ratio = hrf_dict.get("ratio", 1/6))
+
+        # ---------------- outputs ------------------------------------
+        neural_HbO: Dict[str, np.ndarray] = {}
+        neural_HbR: Dict[str, np.ndarray] = {}
+        t_axis_out: Optional[np.ndarray] = None
+
+        # =============================================================
+        # iterate over tasks
+        # =============================================================
+        for task in session.protocol.tasks:
+
+            # ---------- collect (onset,offset) pairs -----------------
+            blocks = [(s, e) for s, e, lbl in session.protocol.intervals
+                      if lbl == task]
+            if not blocks:
+                continue
+
+            epoch_O: List[np.ndarray] = []
+            epoch_R: List[np.ndarray] = []
+
+            # --------------------------------------------------------
+            # loop over blocks
+            # --------------------------------------------------------
+            for on, _ in blocks:
+                start_idx = int(round((on + self.tmin) * fs))
+                L_epoch   = int(round((self.tmax - self.tmin) * fs))
+
+                if start_idx < 0 or start_idx + L_epoch > HbO.shape[0]:
+                    continue   # skip truncated block
+
+                seg_O = HbO[start_idx:start_idx + L_epoch].copy()  # (L,C)
+                seg_R = HbR[start_idx:start_idx + L_epoch].copy()
+
+                # ----- baseline correction (same as HRF extraction)
+                base_start = int(round((on + self.tmin) * fs))
+                base_end   = int(round(on * fs))
+                if base_start >= 0 and base_end > base_start:
+                    base_O = HbO[base_start:base_end].mean(axis=0)
+                    base_R = HbR[base_start:base_end].mean(axis=0)
+                    seg_O -= base_O
+                    seg_R -= base_R
+
+                # ----- optional taper --------------------------------
+                if self.window == "hann":
+                    taper = windows.hann(L_epoch, sym=False)[:, None]
+                    seg_O *= taper
+                    seg_R *= taper
+                elif self.window == "tukey":
+                    taper = windows.tukey(L_epoch, alpha=0.2)[:, None]
+                    seg_O *= taper
+                    seg_R *= taper
+
+                # ----- FFT ------------------------------------------
+                Y1 = rfft(seg_O, axis=0)                        # (F,C)
+                Y2 = rfft(seg_R, axis=0)
+
+                # HRF spectrum (same length n_fft)
+                H = rfft(hrf_kernel, n=L_epoch)                 # (F,)
+                H_safe = np.where(np.abs(H) < 1e-6, 1e-6, H)    # avoid /0
+
+                # ----- frequency-wise solve ------------------------
+                F_bins = Y1.shape[0]
+                alpha_O = np.zeros((F_bins, n), dtype=complex)
+                alpha_R = np.zeros_like(alpha_O)
+
+                for k in range(F_bins):
+                    y_vec = np.concatenate((Y1[k] / H_safe[k],
+                                            Y2[k] / H_safe[k]))   # (2C,)
+
+                    alpha_k = A_inv @ (Bt @ y_vec)                 # (2M,)
+                    alpha_O[k] = alpha_k[:n]
+                    alpha_R[k] = alpha_k[n:]
+
+                # ----- IFFT back to time domain -------------------
+                a_O_time = irfft(alpha_O, n=L_epoch, axis=0)       # (L,M)
+                a_R_time = irfft(alpha_R, n=L_epoch, axis=0)
+
+                map_O = phi @ a_O_time.T                           # (V,L)
+                map_R = phi @ a_R_time.T
+
+                epoch_O.append(map_O)
+                epoch_R.append(map_R)
+
+                if t_axis_out is None:
+                    t_axis_out = np.arange(L_epoch) / fs + self.tmin
+
+            # ---------- grand-average across blocks -----------------
+            if epoch_O:
+                neural_HbO[task] = np.mean(epoch_O, axis=0)        # (V,L)
+                neural_HbR[task] = np.mean(epoch_R, axis=0)
+
+        # ---------------- stash in session ---------------------------
+        session.processed_data["neural_time_axis"] = t_axis_out
+        session.processed_data.setdefault("neural_recon", {})
+        session.processed_data["neural_recon"]["HbO"] = neural_HbO
+        session.processed_data["neural_recon"]["HbR"] = neural_HbR
+
+
+
+# class ReconstructSpatioTemporalEvolution(ProcessingStep):
+#     """
+#     Spatio‑temporal (neural) reconstruction.
+#
+#     Idea
+#     ----
+#     In the frequency domain the forward model factorises ::
+#
+#         Y(f)  =  B · H(f) · α(f)                    (1)
+#
+#         Y(f)   – channel data  (complex, C × 1)
+#         B      – *time‑independent* sensitivity matrix (C × M)
+#         H(f)   – complex Fourier spectrum of the HRF (scalar)
+#         α(f)   – eigen‑mode coefficients of the **neural** signal (M × 1)
+#
+#     For every Fourier bin *k* we solve the Tikhonov‑regularised inverse
+#
+#         α̂_k  =  argmin_α ‖B·H_k·α − Y_k‖²  +  λ‖Λ^{½}α‖²          (2)
+#
+#     with Λ = diag(eigenvalues) and *λ* a **fixed** hyper‑parameter.
+#
+#     Optionally, the same principle is applied in a *wavelet* basis in
+#     which H(f) is approximated by the mean gain of the HRF spectrum in the
+#     pass‑band of each wavelet scale.
+#
+#     Results
+#     -------
+#     Adds to ``session.processed_data``
+#
+#         "HbO_spatiotemporal"  : (T, N_vertices) ndarray  – HbO μM
+#         "HbR_spatiotemporal"  : (T, N_vertices) ndarray  – HbR μM
+#         "alpha_O" / "alpha_R" : dict(freq_bin → complex α_k)   (optional)
+#
+#     Parameters
+#     ----------
+#     num_eigenmodes : int
+#         How many Laplace eigen‑modes to keep (same meaning as elsewhere).
+#     lam            : float
+#         Fixed spatial Tikhonov regularisation weight λ.
+#     basis          : {"fourier", "wavelet"}
+#         Temporal basis used for the de‑convolution.
+#     wavelet        : str | None
+#         PyWavelets identifier (only if *basis="wavelet"*).  Defaults to
+#         "db4", which has proven robust in fNIRS work :contentReference[oaicite:0]{index=0}.
+#     """
+#
+#     # ------------------------------------------------------------------ #
+#     def __init__(self,
+#                  num_eigenmodes : int,
+#                  lam            : float = 1e-1,
+#                  basis          : Literal["fourier", "wavelet"] = "fourier",
+#                  wavelet        : Optional[str] = None):
+#         self.num_eigenmodes = int(num_eigenmodes)
+#         self.lam            = float(lam)
+#         self.basis          = basis
+#         self.wavelet        = wavelet or "db4"
+#
+#     # ======================================================================
+#     # helpers – spectral solvers
+#     # ======================================================================
+#     def _solve_frequency_bin(self,
+#                              B    : np.ndarray,
+#                              Hk   : complex,
+#                              Yk   : np.ndarray,
+#                              Λ    : np.ndarray,
+#                              lam  : float) -> np.ndarray:
+#         """
+#         Solve (2) for one Fourier bin (complex maths, but real code).
+#         """
+#         if np.abs(Hk) < 1e-12:                 # HRF has (almost) zero gain
+#             return np.zeros(Λ.shape[0], complex)
+#
+#         BtB = (np.abs(Hk)**2) * (B.T @ B)      #   |H_k|² BᵀB
+#         rhs =  Hk.conjugate() * (B.T @ Yk)     # H*_k  Bᵀ Y_k
+#         A   = BtB + lam * Λ                    # add Tikhonov term
+#
+#         return np.linalg.solve(A, rhs)         # complex α_k
+#
+#     # ======================================================================
+#     # main entry
+#     # ======================================================================
+#     def _do_process(self, session: "Session") -> None:          # noqa: N802
+#         # -------- (1) geometry ------------------------------------------------
+#         mesh   = session.patient.mesh
+#         verts  = mesh.vertices
+#         start, end = 2, 2 + self.num_eigenmodes
+#         phi    = np.vstack(mesh.eigenmodes[start:end]).T        # (N,M)
+#         eigval = np.array([em.eigenvalue
+#                            for em in mesh.eigenmodes[start:end]])
+#         eigval[0] = 0.0
+#         Λ = np.diag(eigval)
+#
+#         # -------- (2) sensitivity (Jacobian) → Bmn ----------------------------
+#         vj = session.jacobians[0].sample_at_vertices(verts)     # HbO only
+#         B  = np.einsum("nsd,nm->sdm", vj, phi) \
+#                 .reshape(vj.shape[1]*vj.shape[2], -1, order="F")
+#
+#         # -------- (3) data + HRF ---------------------------------------------
+#         HbO = session.processed_data["HbO"]      # shape (T,C)
+#         HbR = session.processed_data["HbR"]
+#         if HbO.ndim == 3:                        # (T,S,D) → (T,C)
+#             HbO = HbO.reshape(HbO.shape[0], -1, order="F")
+#             HbR = HbR.reshape(HbR.shape[0], -1, order="F")
+#         Y_O = HbO.T                              # (C,T)
+#         Y_R = HbR.T
+#
+#         fs   = globals().get("fs", 3.4722)       # Hz
+#
+#         hrf = session.processed_data["hrf"]
+#         hrf_kernel = canonical_hrf(hrf["time"],
+#                                    tau   = hrf.get("tau", 1.0),
+#                                    delay = hrf.get("delay", 0.0),
+#                                    ratio = hrf.get("ratio", 1/6))
+#
+#         # ========== A) FOURIER  =============================================
+#         if self.basis == "fourier":
+#             F = rfft(hrf_kernel, axis=0)                     # (F,)
+#             Yf_O = rfft(Y_O, axis=1)                         # (C,F)
+#             Yf_R = rfft(Y_R, axis=1)
+#
+#             αf_O = np.zeros((F.size, eigval.size), complex)
+#             αf_R = np.zeros_like(αf_O)
+#
+#             for k, Hk in enumerate(F):
+#                 αf_O[k] = self._solve_frequency_bin(B, Hk, Yf_O[:, k],
+#                                                     Λ, self.lam)
+#                 αf_R[k] = self._solve_frequency_bin(B, Hk, Yf_R[:, k],
+#                                                     Λ, self.lam)
+#
+#             α_t_O = irfft(αf_O, n=Y_O.shape[1], axis=0)      # (T,M)
+#             α_t_R = irfft(αf_R, n=Y_R.shape[1], axis=0)
+#
+#         # ========== B) WAVELET  ============================================
+#         else:   # self.basis == "wavelet"
+#             wave = pywt.Wavelet(self.wavelet)
+#             max_level = pywt.dwt_max_level(HbO.shape[0], wave.dec_len)
+#             coeffs_O  = pywt.wavedec(Y_O, wave, axis=1, level=max_level)
+#             coeffs_R  = pywt.wavedec(Y_R, wave, axis=1, level=max_level)
+#
+#             # pre‑compute band‑centre HRF gains
+#             band_gains = []
+#             freqs = rfftfreq(HbO.shape[0], d=1/fs)
+#             H = rfft(hrf_kernel, axis=0)
+#             for level in range(max_level):
+#                 f_lo, f_hi = pywt.scale2frequency(wave, level+1)*fs/2, \
+#                              pywt.scale2frequency(wave, level)*fs/2
+#                 band = (freqs >= f_lo) & (freqs < f_hi)
+#                 band_gains.append(np.mean(np.abs(H[band])) if band.any() else 0.)
+#
+#             α_list_O, α_list_R = [], []
+#             for lvl, gain in enumerate(band_gains):
+#                 if gain < 1e-9:                               # skip if HRF ≈ 0
+#                     α_list_O.append(np.zeros((coeffs_O[lvl].shape[0],
+#                                               eigval.size)))
+#                     α_list_R.append(np.zeros_like(α_list_O[-1]))
+#                     continue
+#
+#                 α_lvl_O = np.vstack([
+#                     self._solve_frequency_bin(B, gain, coeffs_O[lvl][:, t],
+#                                               Λ, self.lam).real
+#                     for t in range(coeffs_O[lvl].shape[1])
+#                 ])
+#                 α_lvl_R = np.vstack([
+#                     self._solve_frequency_bin(B, gain, coeffs_R[lvl][:, t],
+#                                               Λ, self.lam).real
+#                     for t in range(coeffs_R[lvl].shape[1])
+#                 ])
+#                 α_list_O.append(α_lvl_O)
+#                 α_list_R.append(α_lvl_R)
+#
+#             α_t_O = pywt.waverec(α_list_O, wave, axis=0)
+#             α_t_R = pywt.waverec(α_list_R, wave, axis=0)
+#
+#         # -------- (4) back‑projection ----------------------------------------
+#         HbO_rec = (phi @ α_t_O.T).T     # (T,N_vertices)
+#         HbR_rec = (phi @ α_t_R.T).T
+#
+#         session.processed_data["HbO_spatiotemporal"] = HbO_rec
+#         session.processed_data["HbR_spatiotemporal"] = HbR_rec
+#         # store eigen‑coefficients for optional post‑hoc diagnostics
+#         session.processed_data["alpha_O"] = α_t_O
+#         session.processed_data["alpha_R"] = α_t_R
+
+
 import numpy as np
 from scipy.signal import convolve
 from lys.abstract_interfaces.processing_step import ProcessingStep
@@ -2741,6 +3259,186 @@ class ConvertToTStats(ProcessingStep):
         tvals = beta / np.sqrt(np.diag(cov_beta))
         
         return beta, tvals
+
+# --------------------------------------------------------------------- #
+#  ReconstructSpatioTemporalEvolution
+#  (single-alpha formulation – HRFs inside the forward model)
+# --------------------------------------------------------------------- #
+import numpy as np
+from numpy.fft import rfft, irfft
+from scipy.signal import windows
+from lys.abstract_interfaces.processing_step import ProcessingStep
+from lys.objects import Session
+
+
+class ReconstructSpatioTemporalEvolution(ProcessingStep):
+    """
+    Dual-wavelength, task-wise spatio–temporal reconstruction that
+    • assumes *one* neural-activity coefficient vector  α( t )  shared by
+      HbO and HbR,
+    • embeds the chromophore-specific HRFs directly in the frequency-domain
+      forward matrix.
+
+    Stored in  ``session.processed_data`` ::
+
+        "neural_time_axis"             – (L,)
+        "neural_recon" : {
+            "neural" : {task: (V,L)},  # pure neural activity
+            "HbO"    : {task: (V,L)},  # HbO  = neural ⊗ HRF_O
+            "HbR"    : {task: (V,L)},  # HbR  = neural ⊗ HRF_R
+        }
+    """
+
+    # ------------------------------------------------------------------ #
+    def __init__(self,
+                 num_eigenmodes: int,
+                 lambda_reg: float = 1e-2,
+                 *,
+                 tmin: float = -5.0,
+                 tmax: float = 30.0,
+                 window: str | None = "hann") -> None:
+        self.num_eigenmodes = int(num_eigenmodes)
+        self.lambda_reg     = float(lambda_reg)
+        self.tmin           = float(tmin)
+        self.tmax           = float(tmax)
+        self.window         = window
+
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _Bmn(vj: np.ndarray, phi: np.ndarray) -> np.ndarray:
+        """Jacobian contraction → (S·D, M) with Fortran ordering."""
+        B = np.einsum("nsd,nm->sdm", vj, phi)          # (S,D,M)
+        S, D, M = B.shape
+        return B.reshape(S * D, M, order="F")
+
+    # ================================================================== #
+    def _do_process(self, session: "Session") -> None:      # noqa: N802
+        fs = globals().get("fs", 3.4722)                    # Hz
+
+        # ---------- raw channel data -----------------------------------
+        HbO = session.processed_data["HbO"]                 # (T,C_tot)
+        HbR = session.processed_data["HbR"]
+        T , C_tot = HbO.shape
+
+        # ---------- eigen-basis & B-matrices ---------------------------
+        mesh  = session.patient.mesh
+        verts = mesh.vertices
+        modes = mesh.eigenmodes
+        if modes is None:
+            raise RuntimeError("mesh.eigenmodes missing")
+
+        s, e   = 2, 2 + self.num_eigenmodes
+        phi    = np.vstack(modes[s:e]).T                    # (V,M)
+        eigval = np.array([m.eigenvalue for m in modes[s:e]])
+        eigval[0] = 0.0
+        M = eigval.size
+        Λ = np.diag(eigval) * self.lambda_reg               # (M,M)
+
+        vj1 = session.jacobians[0].sample_at_vertices(verts)
+        vj2 = session.jacobians[1].sample_at_vertices(verts)
+        B1  = self._Bmn(vj1, phi)                           # (C,M)
+        B2  = self._Bmn(vj2, phi)
+
+        # ---------- extinction coefficients ----------------------------
+        εO1, εR1 =  586.0, 1548.52
+        εO2, εR2 = 1058.0,  691.32
+
+        # ---------- HRFs -----------------------------------------------
+        hrf_dat = session.processed_data["hrf"]
+        hrf_O   = canonical_hrf(hrf_dat["time"],
+                                tau   = hrf_dat.get("tau",   1.0),
+                                delay = hrf_dat.get("delay", 0.0),
+                                ratio = hrf_dat.get("ratio", 1/6))
+        hrf_R   = -0.1 * hrf_O
+
+        # ---------- outputs --------------------------------------------
+        neural, HbO_maps, HbR_maps = {}, {}, {}
+        t_axis_out = None
+
+        # ===============================================================
+        for task in session.protocol.tasks:
+
+            onoff = [(on, off) for on, off, lbl in session.protocol.intervals
+                     if lbl == task]
+            if not onoff:
+                continue
+
+            ep_neu, ep_O, ep_R = [], [], []
+
+            for on, _ in onoff:
+                start = int(round((on + self.tmin) * fs))
+                L     = int(round((self.tmax - self.tmin) * fs))
+                if start < 0 or start + L > T:
+                    continue
+
+                seg_O = HbO[start:start+L].copy()
+                seg_R = HbR[start:start+L].copy()
+
+                # ---------- baseline correction -----------------------
+                b0 = int(round((on + self.tmin) * fs))
+                b1 = int(round(on * fs))
+                if b0 >= 0 and b1 > b0:
+                    seg_O -= HbO[b0:b1].mean(axis=0)
+                    seg_R -= HbR[b0:b1].mean(axis=0)
+
+                # ---------- optional taper ----------------------------
+                if self.window == "hann":
+                    seg_O *= windows.hann(L, sym=False)[:, None]
+                    seg_R *= windows.hann(L, sym=False)[:, None]
+                elif self.window == "tukey":
+                    seg_O *= windows.tukey(L, .2)[:, None]
+                    seg_R *= windows.tukey(L, .2)[:, None]
+
+                # ---------- FFT ---------------------------------------
+                Y1 = rfft(seg_O, axis=0)                    # (F,C)
+                Y2 = rfft(seg_R, axis=0)
+                H_O = rfft(hrf_O, n=L)                      # (F,)
+                H_R = rfft(hrf_R, n=L)
+
+                F = Y1.shape[0]
+                αf = np.zeros((F, M), complex)
+
+                for k in range(F):
+                    # forward matrix for this frequency bin
+                    g1 = εO1 * H_O[k] + εR1 * H_R[k]        # scalar
+                    g2 = εO2 * H_O[k] + εR2 * H_R[k]
+                    # if both gains ~0 the data carry no information → skip
+                    if abs(g1) < 1e-9 and abs(g2) < 1e-9:
+                        continue
+
+                    Bk  = np.vstack((g1 * B1,
+                                     g2 * B2))             # (2C,M)
+                    yk  = np.concatenate((Y1[k], Y2[k]))    # (2C,)
+
+                    A   = Bk.T @ Bk + Λ
+                    αf[k] = np.linalg.solve(A, Bk.T @ yk)   # (M,)
+
+                α_t = irfft(αf, n=L, axis=0).T              # (M,L)
+
+                neu_map = (phi @ α_t).T                     # (L,V)
+                HbO_map = neu_map * hrf_O[:, None]
+                HbR_map = neu_map * hrf_R[:, None]
+
+                ep_neu.append(neu_map.T)                    # store as (V,L)
+                ep_O  .append(HbO_map.T)
+                ep_R  .append(HbR_map.T)
+
+                if t_axis_out is None:
+                    t_axis_out = np.arange(L) / fs + self.tmin
+
+            if ep_neu:
+                neural [task] = np.mean(ep_neu, axis=0)
+                HbO_maps[task] = np.mean(ep_O , axis=0)
+                HbR_maps[task] = np.mean(ep_R , axis=0)
+
+        # ---------- stash in session ----------------------------------
+        session.processed_data["neural_time_axis"] = t_axis_out
+        rec = session.processed_data.setdefault("neural_recon", {})
+        rec["neural"] = neural
+        rec["HbO"]    = HbO_maps
+        rec["HbR"]    = HbR_maps
+
+
 
 
 class ConvertWavelengthsToOD(ProcessingStep):
