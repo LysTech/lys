@@ -41,10 +41,10 @@ config = [
     {"ConvertWavelengthsToOD": {}},
     {"ConvertODtoHbOandHbR": {}},
     {"RemoveScalpEffect": {}},
-    #{"BandpassFilter": {"lower_bound": 0.01, "upper_bound": 0.1}},
+    #{"BandpassFilter": {"lower_bound": 0.01, "upper_bound": 0.5}},
     {"ExtractHRFviaCanonicalFit": {
         "tmin":  -5,
-        "tmax":  20,
+        "tmax":  25,
         "tau_grid":   np.arange(0.6, 1.45, 0.05),
         "delay_grid": np.arange(-2.0, 2.25, 0.25),
         "ratio_grid": np.arange(0.10, 0.35, 0.05),
@@ -60,7 +60,7 @@ config = [
         "num_eigenmodes": 390,
         "lambda_reg": 5e3,
         "tmin": -5,
-        "tmax": 20,
+        "tmax": 25,
         "window": "hann"
     }},
 ]
@@ -146,7 +146,7 @@ def robust_z(x: np.ndarray) -> np.ndarray:
 sess0 = experiment.sessions[0]          # shorthand
 
 # ----- Mental-subtraction (MS) ------------------------------------
-ms_raw = sess0.processed_data["neural_recon"]["HbO"]["MS"]   # shape (V, T)
+ms_raw = sess0.processed_data["neural_recon"]["neural"]["MS"]   # shape (V, T)
 ms_z   = np.apply_along_axis(robust_z, 0, ms_raw)            # z per frame
 ms_td  = TimeSeriesMeshData(mesh, ms_z)
 
@@ -183,6 +183,7 @@ sdata_dual = StaticMeshData(mesh, dual_z)
 
 scene_dual = VTKScene(title="Time-independent z-map – mental drawing (MD)")
 scene_dual.add(sdata_dual).show()
+
 
 # ------------------------------------------------------------------
 # 6)  Vertex-wise z-score across time  -----------------------------
